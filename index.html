@@ -86,21 +86,31 @@
   .stop-status.alert { color: var(--alert); } .stop-status.alert .dot { background: var(--alert); }
   .stop-meta { font-size: 0.8rem; color: var(--muted); }
 
-  table.deps { width: 100%; border-collapse: collapse; font-size: 1.15rem; }
-  table.deps td { padding: 0.28rem 0.3rem; vertical-align: middle; white-space: nowrap; }
-  td.line { width: 3.6rem; }
+  /* max-width hält Ziel und Zahlen zusammen: ohne sie driften die
+     Minuten auf breiten Screens weit vom Haltestellennamen weg. */
+  table.deps { width: 100%; max-width: 44rem; border-collapse: collapse; font-size: 1.15rem; }
+  table.deps td, table.deps th { padding: 0.28rem 0.3rem; vertical-align: middle; white-space: nowrap; }
+  table.deps th {
+    font-size: 0.72rem; font-weight: 500; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em; padding-bottom: 0.1rem;
+  }
+  th.h-delay, th.h-count, th.h-time { text-align: right; }
+  td.line, th.h-line { width: 3.6rem; }
   .badge {
     display: inline-block; min-width: 2.9rem; text-align: center;
     padding: 0.1rem 0.4rem; border-radius: 0.4rem;
     background: #2a3542; font-weight: 700; font-size: 1.05rem;
   }
+  /* Ziel füllt die Restbreite und kürzt lange Namen mit "…" ab. */
   td.dest { overflow: hidden; text-overflow: ellipsis; max-width: 0; width: 100%; white-space: nowrap; }
-  td.delay { text-align: right; font-weight: 700; width: 4.5rem; }
+  td.delay, th.h-delay { text-align: right; font-weight: 700; width: 4.2rem; }
   tr.warn  td.delay { color: var(--warn); }
   tr.alert td.delay { color: var(--alert); }
   tr.alert td.dest, tr.alert td.line .badge { color: var(--alert); }
-  td.count { text-align: right; font-weight: 700; width: 4.2rem; font-variant-numeric: tabular-nums; }
-  td.time  { text-align: right; color: var(--muted); width: 4.2rem; font-variant-numeric: tabular-nums; }
+  td.count, th.h-count { text-align: right; font-weight: 700; width: 4rem; font-variant-numeric: tabular-nums; }
+  td.time,  th.h-time  { text-align: right; width: 4rem; font-variant-numeric: tabular-nums; }
+  td.time { color: var(--muted); }
+  tr.warn td.time, tr.alert td.time { color: var(--text); }
   .empty-msg { color: var(--muted); font-size: 1rem; padding: 0.6rem 0.2rem; }
 
   /* ---------- Rechte Spalte ---------- */
@@ -114,6 +124,13 @@
     font-size: 0.85rem; font-variant-numeric: tabular-nums;
   }
   #radar-label .nowcast { color: var(--accent); }
+  #radar-label .rl-time { font-weight: 700; }
+  #radar-label .rl-rel { color: var(--muted); }
+  #radar-label .rl-bar {
+    display: block; height: 3px; margin-top: 0.35rem;
+    background: #2a3542; border-radius: 2px; overflow: hidden;
+  }
+  #radar-label .rl-bar i { display: block; height: 100%; background: var(--accent); }
 
   #weather-card { flex: 2; }
   #weather-head { display: flex; align-items: baseline; gap: 0.7rem; }
@@ -213,7 +230,10 @@ const CONFIG = {
       categories: ["S", "IR", "RE", "IC", "EC"] },
   ],
   home: { lat: 47.3922, lon: 8.5180 },   // Ogilvy, Zürich West
-  mapZoom: 11,                           // weit genug, um aufziehenden Regen zu sehen
+  // Zoom 10 zeigt genug Umland, um aufziehenden Regen früh zu sehen — und
+  // liegt innerhalb der Zoomstufen, für die RainViewer Radarkacheln liefert.
+  mapZoom: 10,
+  radarMaxNativeZoom: 10,                // darüber liefert RainViewer "Zoom Level Not Supported"
 
   refreshOevMs:     60_000,              // Abfahrten
   refreshWeatherMs: 10 * 60_000,         // Wetterzahlen
@@ -389,19 +409,26 @@ function renderStops() {
       const countMin = Math.max(0, Math.round((d.effective - now) / 60_000));
       const count = countMin === 0 ? "jetzt" : `${countMin}′`;
       const delay = d.delayMin >= CONFIG.delayWarnMin ? `+${d.delayMin}′` : "";
+      // "ab" ist die tatsächlich erwartete Abfahrt (Fahrplan + Verspätung),
+      // damit Countdown und Uhrzeit denselben Zeitpunkt meinen.
       return `<tr class="${cls}">
         <td class="line"><span class="badge">${d.line}</span></td>
         <td class="dest">${d.to}</td>
         <td class="delay">${delay}</td>
         <td class="count">${count}</td>
-        <td class="time">${fmtTime(new Date(d.scheduled))}</td>
+        <td class="time">${fmtTime(new Date(d.effective))}</td>
       </tr>`;
     }).join("");
+
+    const head = `<thead><tr>
+      <th class="h-line"></th><th></th>
+      <th class="h-delay">Versp.</th><th class="h-count">in</th><th class="h-time">ab</th>
+    </tr></thead>`;
 
     const body = st.error && !st.journeys
       ? `<div class="empty-msg">Daten nicht verfügbar (${st.error.message})</div>`
       : deps.length
-        ? `<table class="deps"><tbody>${rows}</tbody></table>`
+        ? `<table class="deps">${head}<tbody>${rows}</tbody></table>`
         : `<div class="empty-msg">Keine Abfahrten in den nächsten ${CONFIG.maxLookaheadMin} min</div>`;
 
     card.innerHTML = `
@@ -501,7 +528,10 @@ async function refreshWeather() {
     headEl.textContent = `Regen in ca. ${firstRainMin} min`;
     headEl.className = "headline rain";
   } else {
-    headEl.textContent = "Nächste 2 h: kein Regen erwartet";
+    // Konkrete Uhrzeit statt "nächste 2 h" — sonst liest man es als
+    // "in 2 Stunden kommt Regen".
+    const bis = fmtTime(new Date(Date.now() + 2 * 3600_000));
+    headEl.textContent = `Trocken bis mindestens ${bis}`;
     headEl.className = "headline";
   }
   $("#w-rain .detail").textContent =
@@ -576,8 +606,8 @@ async function initRainviewerRadar() {
   radar.mode = "rainviewer";
   radar.frames = frames;
   radar.layers = frames.map((f) =>
-    L.tileLayer(`${cfg.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, { opacity: 0, maxZoom: 12 })
-      .addTo(map));
+    L.tileLayer(`${cfg.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`,
+      { opacity: 0, maxNativeZoom: CONFIG.radarMaxNativeZoom }).addTo(map));
   radar.idx = 0;
 
   const lastPastIdx = cfg.radar.past.slice(-7).length - 1;
@@ -586,8 +616,17 @@ async function initRainviewerRadar() {
     const f = radar.frames[radar.idx];
     const t = new Date(f.time * 1000);
     const isNowcast = radar.idx > lastPastIdx;
+    // Relative Beschriftung: ohne sie wirkt die Animation wie eine
+    // springende Uhr statt wie ein Zeitverlauf.
+    const diffMin = Math.round((t.getTime() - Date.now()) / 60_000);
+    const rel = isNowcast ? `in ${Math.max(diffMin, 0)} min`
+              : diffMin >= -2 ? "jetzt" : `vor ${-diffMin} min`;
+    const pct = ((radar.idx + 1) / radar.frames.length) * 100;
     $("#radar-label").innerHTML =
-      `Radar ${fmtTime(t)}${isNowcast ? ' <span class="nowcast">Prognose</span>' : ""}`;
+      `<span class="rl-time">${fmtTime(t)}</span> `
+      + `<span class="${isNowcast ? "nowcast" : "rl-rel"}">${rel}${isNowcast ? " · Prognose" : ""}</span>`
+      + `<span class="rl-bar"><i style="width:${pct}%"></i></span>`;
+    // Letztes Bild etwas länger stehen lassen, damit "jetzt" ablesbar ist
     radar.idx = (radar.idx + 1) % radar.frames.length;
   }, CONFIG.radarFrameMs);
   $("#radar-src").textContent = "Radar: RainViewer (Fallback)";
