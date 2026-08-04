@@ -103,7 +103,8 @@
   }
   /* Ziel füllt die Restbreite und kürzt lange Namen mit "…" ab. */
   td.dest { overflow: hidden; text-overflow: ellipsis; max-width: 0; width: 100%; white-space: nowrap; }
-  td.delay, th.h-delay { text-align: right; font-weight: 700; width: 4.2rem; }
+  /* Verspätung steht rechts neben der Abfahrtszeit: "15:29  +2′" */
+  td.delay, th.h-delay { text-align: left; font-weight: 700; width: 3.4rem; padding-left: 0.5rem; }
   tr.warn  td.delay { color: var(--warn); }
   tr.alert td.delay { color: var(--alert); }
   tr.alert td.dest, tr.alert td.line .badge { color: var(--alert); }
@@ -115,7 +116,7 @@
 
   /* ---------- Rechte Spalte ---------- */
   #right { display: flex; flex-direction: column; gap: 0.9rem; min-height: 0; }
-  #map-card { flex: 3; padding: 0; position: relative; }
+  #map-card { flex: 5; padding: 0; position: relative; }
   #map { position: absolute; inset: 0; border-radius: 0.8rem; background: #0a0e12; }
   #radar-label {
     position: absolute; z-index: 1000; top: 0.6rem; right: 0.6rem;
@@ -132,7 +133,7 @@
   }
   #radar-label .rl-bar i { display: block; height: 100%; background: var(--accent); }
 
-  #weather-card { flex: 2; }
+  #weather-card { flex: 3; }
   #weather-head { display: flex; align-items: baseline; gap: 0.7rem; }
   #weather-head h2 { font-size: 1.1rem; font-weight: 600; }
   #weather-head .src { margin-left: auto; font-size: 0.75rem; color: var(--muted); }
@@ -144,6 +145,27 @@
   #w-rain .headline { font-size: 1.35rem; font-weight: 600; }
   #w-rain .headline.rain { color: var(--accent); }
   #w-rain .detail { font-size: 0.95rem; color: var(--muted); margin-top: 0.25rem; }
+
+  /* Tagesverlauf: eine Spalte je Stunde, Balkenhöhe = Regenwahrscheinlichkeit */
+  #w-hours {
+    display: flex; gap: 0.25rem; align-items: flex-end;
+    margin-top: 0.5rem; padding-top: 0.7rem;
+    border-top: 1px solid var(--card-edge);
+  }
+  .wh { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; min-width: 0; }
+  .wh.now { background: rgba(77,163,255,0.10); border-radius: 0.4rem; padding: 0.2rem 0; }
+  .wh .h-time { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .wh.now .h-time { color: var(--accent); font-weight: 700; }
+  .wh .h-icon { font-size: 1.25rem; line-height: 1.1; }
+  .wh .h-temp { font-size: 0.95rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .wh .h-bar {
+    width: 100%; max-width: 1.5rem; height: 2.6rem; background: #1e2732;
+    border-radius: 0.2rem; display: flex; align-items: flex-end; overflow: hidden;
+  }
+  .wh .h-bar i { display: block; width: 100%; background: var(--accent); }
+  .wh .h-bar i.dry { background: #2f3d4c; }
+  .wh .h-pct { font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .wh .h-pct.wet { color: var(--accent); font-weight: 700; }
 
   footer {
     display: flex; gap: 1rem;
@@ -196,6 +218,7 @@
           <div class="detail"></div>
         </div>
       </div>
+      <div id="w-hours"></div>
     </div>
   </section>
 </main>
@@ -230,10 +253,11 @@ const CONFIG = {
       categories: ["S", "IR", "RE", "IC", "EC"] },
   ],
   home: { lat: 47.3922, lon: 8.5180 },   // Ogilvy, Zürich West
-  // Zoom 10 zeigt genug Umland, um aufziehenden Regen früh zu sehen — und
-  // liegt innerhalb der Zoomstufen, für die RainViewer Radarkacheln liefert.
-  mapZoom: 10,
-  radarMaxNativeZoom: 10,                // darüber liefert RainViewer "Zoom Level Not Supported"
+  // Zoom 9 zeigt genug Umland, um aufziehenden Regen früh zu sehen.
+  // Radarkacheln werden nur bis maxNativeZoom angefragt und darüber
+  // hochskaliert — RainViewer liefert sonst "Zoom Level Not Supported".
+  mapZoom: 9,
+  radarMaxNativeZoom: 8,
 
   refreshOevMs:     60_000,              // Abfahrten
   refreshWeatherMs: 10 * 60_000,         // Wetterzahlen
@@ -243,6 +267,9 @@ const CONFIG = {
 
   delayWarnMin:  2,                      // gelb ab X Minuten Verspätung
   delayAlertMin: 5,                      // rot ab X Minuten
+
+  forecastHours: 12,                     // Stunden im Tagesverlauf-Streifen
+  rainRiskPct:   40,                     // ab welcher Wahrscheinlichkeit "Regenrisiko"
 
   maxLookaheadMin: 90,                   // Abfahrten weiter weg ausblenden
   nightlyReloadHour: 4,                  // täglicher Seiten-Reload (Memory-Hygiene)
@@ -414,15 +441,15 @@ function renderStops() {
       return `<tr class="${cls}">
         <td class="line"><span class="badge">${d.line}</span></td>
         <td class="dest">${d.to}</td>
-        <td class="delay">${delay}</td>
         <td class="count">${count}</td>
         <td class="time">${fmtTime(new Date(d.effective))}</td>
+        <td class="delay">${delay}</td>
       </tr>`;
     }).join("");
 
     const head = `<thead><tr>
       <th class="h-line"></th><th></th>
-      <th class="h-delay">Versp.</th><th class="h-count">in</th><th class="h-time">ab</th>
+      <th class="h-count">in</th><th class="h-time">ab</th><th class="h-delay">Versp.</th>
     </tr></thead>`;
 
     const body = st.error && !st.journeys
@@ -473,8 +500,9 @@ async function refreshWeather() {
     + `?latitude=${CONFIG.home.lat}&longitude=${CONFIG.home.lon}`
     + "&current=temperature_2m,apparent_temperature,precipitation,weather_code"
     + "&minutely_15=precipitation"
-    + "&hourly=precipitation_probability"
-    + "&forecast_days=1&timezone=Europe%2FZurich";
+    + "&hourly=precipitation_probability,temperature_2m,weather_code"
+    // 2 Tage, damit der Stundenstreifen auch abends über Mitternacht reicht
+    + "&forecast_days=2&timezone=Europe%2FZurich";
   // Reihenfolge: MeteoSwiss ICON-CH1 (feinstes Modell für die Schweiz),
   // dann ICON-CH2, zuletzt Open-Meteos automatische Modellwahl.
   let data, modelLabel;
@@ -520,6 +548,14 @@ async function refreshWeather() {
     .filter((p) => p != null);
   const prob = probs.length ? Math.max(...probs) : null;
 
+  // Erste Stunde mit nennenswertem Regenrisiko im weiteren Tagesverlauf
+  const h0 = Math.max(hIdx, 0);
+  const hourProbs = hh.precipitation_probability || [];
+  let riskAt = null;
+  for (let i = h0; i < Math.min(h0 + CONFIG.forecastHours, hourProbs.length); i++) {
+    if ((hourProbs[i] || 0) >= CONFIG.rainRiskPct) { riskAt = new Date(hh.time[i]); break; }
+  }
+
   const headEl = $("#w-rain .headline");
   if ((cur.precipitation || 0) >= 0.1) {
     headEl.textContent = `Regnet jetzt (${cur.precipitation.toFixed(1)} mm/h)`;
@@ -527,17 +563,45 @@ async function refreshWeather() {
   } else if (firstRainMin !== null && firstRainMin > 0) {
     headEl.textContent = `Regen in ca. ${firstRainMin} min`;
     headEl.className = "headline rain";
+  } else if (riskAt) {
+    headEl.textContent = `Trocken – Regenrisiko ab ca. ${fmtTime(riskAt)}`;
+    headEl.className = "headline";
   } else {
-    // Konkrete Uhrzeit statt "nächste 2 h" — sonst liest man es als
-    // "in 2 Stunden kommt Regen".
-    const bis = fmtTime(new Date(Date.now() + 2 * 3600_000));
-    headEl.textContent = `Trocken bis mindestens ${bis}`;
+    headEl.textContent = "Trocken – kein Regen in Sicht";
     headEl.className = "headline";
   }
   $("#w-rain .detail").textContent =
     `${text}${prob != null ? ` · Regenwahrscheinlichkeit ${prob} %` : ""}`
     + (sum2h >= 0.1 ? ` · ${sum2h.toFixed(1)} mm in 2 h` : "")
     + ` · Modell ${modelLabel}`;
+
+  renderHourly(hh, h0);
+}
+
+/** Stundenstreifen: Uhrzeit, Symbol, Temperatur, Regenwahrscheinlichkeit. */
+function renderHourly(hh, from) {
+  const el = $("#w-hours");
+  const times = hh.time || [];
+  if (!times.length) { el.innerHTML = ""; return; }
+
+  const slice = [];
+  for (let i = from; i < Math.min(from + CONFIG.forecastHours, times.length); i++) slice.push(i);
+
+  el.innerHTML = slice.map((i, n) => {
+    const t = new Date(times[i]);
+    const p = hh.precipitation_probability?.[i] ?? 0;
+    const temp = hh.temperature_2m?.[i];
+    const [ic] = WMO_ICONS[hh.weather_code?.[i]] || ["·"];
+    const wet = p >= CONFIG.rainRiskPct;
+    // Mindesthöhe 2 %, damit auch 0 % als leerer Balken sichtbar bleibt
+    return `<div class="wh${n === 0 ? " now" : ""}">
+      <span class="h-pct${wet ? " wet" : ""}">${p}%</span>
+      <span class="h-bar"><i class="${wet ? "" : "dry"}" style="height:${Math.max(p, 2)}%"></i></span>
+      <span class="h-icon">${ic}</span>
+      <span class="h-temp">${temp != null ? Math.round(temp) + "°" : "–"}</span>
+      <span class="h-time">${n === 0 ? "jetzt" : t.getHours() + "h"}</span>
+    </div>`;
+  }).join("");
 }
 
 /* =========================================================================
