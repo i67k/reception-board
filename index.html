@@ -17,6 +17,12 @@
     --warn: #ffb020;
     --alert: #ff4d5e;
     --accent: #4da3ff;
+    /* Niederschlagsarten — je Art eine eigene Farbe, damit der Balken
+       nicht nur "wie viel" sondern auch "was" zeigt. */
+    --p-rain:  #4da3ff;
+    --p-snow:  #cfe8ff;
+    --p-ice:   #34d9c6;
+    --p-storm: #a874ff;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -162,10 +168,23 @@
     width: 100%; max-width: 1.5rem; height: 2.6rem; background: #1e2732;
     border-radius: 0.2rem; display: flex; align-items: flex-end; overflow: hidden;
   }
-  .wh .h-bar i { display: block; width: 100%; background: var(--accent); }
-  .wh .h-bar i.dry { background: #2f3d4c; }
-  .wh .h-pct { font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .wh .h-pct.wet { color: var(--accent); font-weight: 700; }
+  .wh .h-bar i { display: block; width: 100%; }
+  .wh .h-pct { font-size: 0.7rem; font-variant-numeric: tabular-nums; color: var(--muted); }
+  /* Farbe nach Niederschlagsart; ohne konkrete Art bleibt es blau,
+     aber gedimmt — die Balkenhöhe trägt dann die Aussage allein. */
+  .k-rain  { background: var(--p-rain);  }
+  .k-snow  { background: var(--p-snow);  }
+  .k-ice   { background: var(--p-ice);   }
+  .k-storm { background: var(--p-storm); }
+  .k-none  { background: var(--p-rain); opacity: 0.4; }
+  .wh .h-pct.t-rain  { color: var(--p-rain);  font-weight: 700; }
+  .wh .h-pct.t-snow  { color: var(--p-snow);  font-weight: 700; }
+  .wh .h-pct.t-ice   { color: var(--p-ice);   font-weight: 700; }
+  .wh .h-pct.t-storm { color: var(--p-storm); font-weight: 700; }
+
+  #w-legend { display: flex; gap: 0.9rem; margin-top: 0.45rem; font-size: 0.72rem; color: var(--muted); }
+  #w-legend span { display: flex; align-items: center; gap: 0.3rem; }
+  #w-legend i { width: 0.6rem; height: 0.6rem; border-radius: 0.15rem; display: inline-block; }
 
   footer {
     display: flex; gap: 1rem;
@@ -219,6 +238,7 @@
         </div>
       </div>
       <div id="w-hours"></div>
+      <div id="w-legend"></div>
     </div>
   </section>
 </main>
@@ -487,8 +507,9 @@ const WMO_ICONS = {
   0: ["☀️", "klar"], 1: ["🌤", "meist klar"], 2: ["⛅", "teils bewölkt"], 3: ["☁️", "bedeckt"],
   45: ["🌫", "Nebel"], 48: ["🌫", "Reifnebel"],
   51: ["🌦", "leichter Niesel"], 53: ["🌦", "Niesel"], 55: ["🌧", "starker Niesel"],
+  56: ["🧊", "gefrierender Niesel"], 57: ["🧊", "gefrierender Niesel"],
   61: ["🌧", "leichter Regen"], 63: ["🌧", "Regen"], 65: ["🌧", "starker Regen"],
-  66: ["🌧", "gefrierender Regen"], 67: ["🌧", "gefrierender Regen"],
+  66: ["🧊", "gefrierender Regen"], 67: ["🧊", "gefrierender Regen"],
   71: ["🌨", "leichter Schneefall"], 73: ["🌨", "Schneefall"], 75: ["🌨", "starker Schneefall"],
   77: ["🌨", "Schneegriesel"], 80: ["🌦", "Regenschauer"], 81: ["🌧", "Regenschauer"],
   82: ["⛈", "heftige Schauer"], 85: ["🌨", "Schneeschauer"], 86: ["🌨", "Schneeschauer"],
@@ -578,30 +599,47 @@ async function refreshWeather() {
   renderHourly(hh, h0);
 }
 
-/** Stundenstreifen: Uhrzeit, Symbol, Temperatur, Regenwahrscheinlichkeit. */
+/** Niederschlagsart aus dem WMO-Wettercode — bestimmt die Balkenfarbe. */
+function precipKind(code) {
+  if (code >= 95) return { key: "storm", label: "Gewitter / Hagel" };
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return { key: "snow", label: "Schnee" };
+  if (code === 56 || code === 57 || code === 66 || code === 67) return { key: "ice", label: "Eisregen" };
+  if ((code >= 51 && code <= 65) || (code >= 80 && code <= 82)) return { key: "rain", label: "Regen" };
+  return { key: "none", label: null };   // trocken oder nur bewölkt
+}
+
+/** Stundenstreifen: Uhrzeit, Symbol, Temperatur, Niederschlagswahrscheinlichkeit. */
 function renderHourly(hh, from) {
   const el = $("#w-hours");
   const times = hh.time || [];
-  if (!times.length) { el.innerHTML = ""; return; }
+  if (!times.length) { el.innerHTML = ""; $("#w-legend").innerHTML = ""; return; }
 
   const slice = [];
   for (let i = from; i < Math.min(from + CONFIG.forecastHours, times.length); i++) slice.push(i);
 
+  const seen = new Map();   // Arten, die im Zeitfenster tatsächlich vorkommen
   el.innerHTML = slice.map((i, n) => {
     const t = new Date(times[i]);
     const p = hh.precipitation_probability?.[i] ?? 0;
     const temp = hh.temperature_2m?.[i];
-    const [ic] = WMO_ICONS[hh.weather_code?.[i]] || ["·"];
-    const wet = p >= CONFIG.rainRiskPct;
-    // Mindesthöhe 2 %, damit auch 0 % als leerer Balken sichtbar bleibt
+    const code = hh.weather_code?.[i];
+    const [ic] = WMO_ICONS[code] || ["·"];
+    const kind = precipKind(code);
+    if (kind.label && p >= CONFIG.rainRiskPct) seen.set(kind.key, kind.label);
+    // Mindesthöhe 2 %, damit auch 0 % als flacher Balken sichtbar bleibt
     return `<div class="wh${n === 0 ? " now" : ""}">
-      <span class="h-pct${wet ? " wet" : ""}">${p}%</span>
-      <span class="h-bar"><i class="${wet ? "" : "dry"}" style="height:${Math.max(p, 2)}%"></i></span>
+      <span class="h-pct t-${kind.key}">${p}%</span>
+      <span class="h-bar"><i class="k-${kind.key}" style="height:${Math.max(p, 2)}%"></i></span>
       <span class="h-icon">${ic}</span>
       <span class="h-temp">${temp != null ? Math.round(temp) + "°" : "–"}</span>
       <span class="h-time">${n === 0 ? "jetzt" : t.getHours() + "h"}</span>
     </div>`;
   }).join("");
+
+  // Legende nur für Arten, die im Zeitfenster wirklich auftreten
+  $("#w-legend").innerHTML = seen.size
+    ? [...seen].map(([k, label]) => `<span><i class="k-${k}"></i>${label}</span>`).join("")
+    : `<span><i class="k-none"></i>kein Niederschlag erwartet</span>`;
 }
 
 /* =========================================================================
