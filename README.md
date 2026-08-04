@@ -45,6 +45,42 @@ Zugriff aufs Firmennetz. Es werden keine Personendaten verarbeitet.
 Der lizenzpflichtige Quellenhinweis **„Source: MeteoSwiss"** ist auf der Tafel
 sichtbar (Wetterkarte), zusätzlich Attribution in der Fusszeile.
 
+## API-Links prüfen
+
+Die Tafel hat einen eingebauten **Diagnose-Modus**: `index.html?debug` aufrufen
+(oder auf der Seite die Taste **`d`** drücken). Ein Overlay listet dann jede
+Datenquelle mit ✓/✗, der aufgelösten Haltestellen-ID, der Anzahl Abfahrten und
+dem tatsächlich verwendeten Wettermodell. Das ist der schnellste Weg, bei der
+Inbetriebnahme am Kiosk zu sehen, welcher Link antwortet — ohne
+Entwicklerkonsole.
+
+Zum Nachprüfen von Hand (einfach im Browser öffnen, alle liefern JSON):
+
+```
+# Haltestelle suchen -> liefert die ID im Feld stations[].id
+https://transport.opendata.ch/v1/locations?query=Z%C3%BCrich,%20Fischerweg
+https://transport.opendata.ch/v1/locations?query=Z%C3%BCrich,%20Escher-Wyss-Platz
+https://transport.opendata.ch/v1/locations?query=Z%C3%BCrich%20Hardbr%C3%BCcke
+
+# Abfahrtstafel zu einer ID (Feld stationboard[].stop.delay = Verspätung in min)
+https://transport.opendata.ch/v1/stationboard?id=8503020&limit=16
+
+# Wetter mit MeteoSwiss-Modell
+https://api.open-meteo.com/v1/forecast?latitude=47.3922&longitude=8.5180&current=temperature_2m,apparent_temperature,precipitation,weather_code&minutely_15=precipitation&hourly=precipitation_probability&forecast_days=1&timezone=Europe%2FZurich&models=meteoswiss_icon_ch1
+
+# Radar-Framelisten (Fallback-Quelle)
+https://api.rainviewer.com/public/weather-maps.json
+
+# Basiskarten-Kachel (muss ein Bild zeigen, kein Fehler)
+https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/11/1069/722.jpeg
+```
+
+Hinweis zum Wettermodell: Open-Meteo führt die MeteoSwiss-Modelle unter
+`meteoswiss_icon_ch1` / `meteoswiss_icon_ch2` (nicht `icon_ch1` — das ist der
+DWD-Namensraum). Die Seite probiert die Modelle der Reihe nach durch und
+schreibt das tatsächlich verwendete in die Wetterzeile, damit ein stiller
+Rückfall auf ein Nicht-MeteoSwiss-Modell sichtbar bleibt.
+
 ## Ergebnis der Vorab-Verifikation (offene Punkte aus dem Projektauftrag)
 
 **Haltestellen-IDs:** Werden zur Laufzeit über

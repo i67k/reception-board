@@ -136,6 +136,19 @@
   }
   footer .right { margin-left: auto; }
   #net-warn { color: var(--alert); font-weight: 600; display: none; }
+
+  /* Diagnose-Overlay (?debug oder Taste "d") */
+  #diag {
+    display: none; position: fixed; z-index: 2000; left: 1.4rem; bottom: 2.4rem;
+    background: rgba(10,14,18,0.96); border: 1px solid var(--card-edge);
+    border-radius: 0.6rem; padding: 0.7rem 0.9rem; font-size: 0.85rem;
+    min-width: 22rem; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  #diag b { display: block; margin-bottom: 0.4rem; }
+  #diag div { display: flex; gap: 0.6rem; padding: 0.12rem 0; }
+  #diag span { margin-left: auto; color: var(--muted); }
+  #diag .d-ok { color: var(--ok); }
+  #diag .d-fail { color: var(--alert); }
 </style>
 </head>
 <body>
@@ -179,6 +192,8 @@
   <span class="right" id="last-update">–</span>
 </footer>
 
+<div id="diag"></div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
@@ -212,6 +227,15 @@ const CONFIG = {
   maxLookaheadMin: 90,                   // Abfahrten weiter weg ausblenden
   nightlyReloadHour: 4,                  // täglicher Seiten-Reload (Memory-Hygiene)
 
+  // Wettermodelle in Reihenfolge der Bevorzugung. Open-Meteo führt die
+  // MeteoSwiss-Modelle unter "meteoswiss_*"; scheitert eines, wird das
+  // nächste probiert. Ohne param = automatische Modellwahl von Open-Meteo.
+  weatherModels: [
+    { param: "meteoswiss_icon_ch1", label: "MeteoSwiss ICON-CH1" },
+    { param: "meteoswiss_icon_ch2", label: "MeteoSwiss ICON-CH2" },
+    { param: null,                  label: "Open-Meteo best match" },
+  ],
+
   // Kandidaten für einen MeteoSwiss-Radar-Layer auf wms.geo.admin.ch.
   // Existenz ist nicht bestätigt (Stand Verifikation: nur Messwerte-Layer
   // öffentlich); die Seite probiert sie zur Laufzeit und fällt sonst auf
@@ -234,6 +258,31 @@ async function fetchJson(url) {
   if (!resp.ok) throw new Error(`HTTP ${resp.status} für ${url}`);
   return resp.json();
 }
+
+/* -------------------------------------------------------------------------
+ * Diagnose-Overlay: zeigt pro Datenquelle, ob der Link antwortet.
+ * Aufruf mit ?debug in der URL oder Taste "d" — für Inbetriebnahme und
+ * Fehlersuche am Kiosk, wo keine Entwicklerkonsole zur Hand ist.
+ * ------------------------------------------------------------------------- */
+const diag = {
+  entries: new Map(),
+  visible: new URLSearchParams(location.search).has("debug"),
+  set(name, ok, note) {
+    this.entries.set(name, { ok, note, at: Date.now() });
+    this.render();
+  },
+  toggle() { this.visible = !this.visible; this.render(); },
+  render() {
+    const box = $("#diag");
+    box.style.display = this.visible ? "block" : "none";
+    if (!this.visible) return;
+    box.innerHTML = "<b>Datenquellen</b>" + [...this.entries]
+      .map(([name, e]) => `<div class="${e.ok ? "d-ok" : "d-fail"}">`
+        + `${e.ok ? "✓" : "✗"} ${name}<span>${e.note || ""}</span></div>`)
+      .join("");
+  },
+};
+addEventListener("keydown", (e) => { if (e.key === "d") diag.toggle(); });
 
 /* =========================================================================
  * Uhr + Statuszeile
@@ -279,9 +328,11 @@ async function fetchStationboard(stop) {
     st.journeys = data.stationboard || [];
     st.fetchedAt = Date.now();
     st.error = null;
+    diag.set(stop.label, true, `ID ${st.id} · ${st.journeys.length} Abfahrten`);
   } catch (err) {
     st.error = err;
     console.warn("Stationboard-Fehler", stop.key, err);
+    diag.set(stop.label, false, err.message);
   }
 }
 
@@ -397,17 +448,24 @@ async function refreshWeather() {
     + "&minutely_15=precipitation"
     + "&hourly=precipitation_probability"
     + "&forecast_days=1&timezone=Europe%2FZurich";
-  let data, modelLabel = "ICON-CH1";
-  try {
-    data = await fetchJson(base + "&models=icon_ch1");        // MeteoSwiss ICON-CH1
-  } catch {
-    try { data = await fetchJson(base); modelLabel = "best match"; }  // Fallback
-    catch (err) {
-      $("#w-rain .headline").textContent = "Wetterdaten nicht verfügbar";
-      console.warn("Wetter-Fehler", err);
-      return;
+  // Reihenfolge: MeteoSwiss ICON-CH1 (feinstes Modell für die Schweiz),
+  // dann ICON-CH2, zuletzt Open-Meteos automatische Modellwahl.
+  let data, modelLabel;
+  for (const m of CONFIG.weatherModels) {
+    try {
+      data = await fetchJson(base + (m.param ? "&models=" + m.param : ""));
+      modelLabel = m.label;
+      break;
+    } catch (err) {
+      console.warn("Wettermodell nicht verfügbar:", m.param || "(auto)", err.message);
     }
   }
+  if (!data) {
+    $("#w-rain .headline").textContent = "Wetterdaten nicht verfügbar";
+    diag.set("Wetter", false, "kein Modell erreichbar");
+    return;
+  }
+  diag.set("Wetter", true, modelLabel);
 
   const cur = data.current;
   const [icon, text] = WMO_ICONS[cur.weather_code] || ["·", ""];
@@ -503,6 +561,7 @@ async function tryWmsRadar() {
       radar.mode = "wms";
       $("#radar-label").textContent = "Radar: MeteoSwiss (geo.admin.ch)";
       $("#radar-src").textContent = "Radar: MeteoSwiss via geo.admin.ch";
+      diag.set("Radar", true, "WMS " + layer);
       return true;
     }
   }
@@ -532,6 +591,7 @@ async function initRainviewerRadar() {
     radar.idx = (radar.idx + 1) % radar.frames.length;
   }, CONFIG.radarFrameMs);
   $("#radar-src").textContent = "Radar: RainViewer (Fallback)";
+  diag.set("Radar", true, `RainViewer · ${frames.length} Bilder`);
 }
 
 async function refreshRadar() {
@@ -541,6 +601,7 @@ async function refreshRadar() {
   } catch (err) {
     console.warn("Radar-Fehler", err);
     $("#radar-label").textContent = "Radar nicht verfügbar";
+    diag.set("Radar", false, err.message);
   }
 }
 
