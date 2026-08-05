@@ -293,7 +293,11 @@ const CONFIG = {
   // Radarkacheln werden nur bis maxNativeZoom angefragt und darüber
   // hochskaliert — RainViewer liefert sonst "Zoom Level Not Supported".
   mapZoom: 9,
-  radarMaxNativeZoom: 8,
+  // RainViewer liefert nur bis zu einer bestimmten Zoomstufe echte Kacheln,
+  // darüber ein Platzhalterbild ("Zoom Level Not Supported"). Welche Stufe
+  // das ist, wird beim Start gemessen — diese Kandidaten von scharf nach
+  // grob durchprobiert. Greift keine, bleibt das Radar aus.
+  radarZoomCandidates: [9, 8, 7, 6, 5],
 
   refreshOevMs:     60_000,              // Abfahrten
   refreshWeatherMs: 10 * 60_000,         // Wetterzahlen
@@ -775,16 +779,74 @@ async function tryWmsRadar() {
   return false;
 }
 
+/** Kachelkoordinaten (Slippy Map) für eine Position und Zoomstufe. */
+function lonLatToTile(lon, lat, z) {
+  const n = 2 ** z;
+  const r = (lat * Math.PI) / 180;
+  return {
+    x: Math.floor(((lon + 180) / 360) * n),
+    y: Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n),
+  };
+}
+
+async function tileByteSize(url) {
+  try {
+    const resp = await fetch(url, { cache: "no-store" });
+    return resp.ok ? (await resp.blob()).size : null;
+  } catch { return null; }          // CORS oder Netzfehler -> unbekannt
+}
+
+/**
+ * Prüft, ob RainViewer auf dieser Zoomstufe echte Radarkacheln liefert.
+ * Das Platzhalterbild "Zoom Level Not Supported" ist für jede Kachel
+ * byte-identisch und deutlich grösser als eine leere (regenfreie) Kachel.
+ * Zwei verschiedene Kacheln gleicher Grösse oberhalb dieser Schwelle sind
+ * also der Platzhalter. Rückgabe null = nicht feststellbar.
+ */
+async function radarZoomUsable(host, path, z) {
+  const a = lonLatToTile(CONFIG.home.lon, CONFIG.home.lat, z);
+  const url = (x, y) => `${host}${path}/256/${z}/${x}/${y}/2/1_1.png`;
+  const [s1, s2] = await Promise.all([
+    tileByteSize(url(a.x, a.y)), tileByteSize(url(a.x + 1, a.y + 1)),
+  ]);
+  if (s1 == null || s2 == null) return null;
+  return !(s1 === s2 && s1 > 1500);
+}
+
 /** Fallback: RainViewer-Radarkacheln, letzte Stunde + 30 min Nowcast, animiert. */
 async function initRainviewerRadar() {
   const cfg = await fetchJson("https://api.rainviewer.com/public/weather-maps.json");
   const frames = [...cfg.radar.past.slice(-7), ...(cfg.radar.nowcast || [])];
+
+  // Höchste Zoomstufe suchen, die echte Kacheln liefert
+  let nativeZoom = null, probed = false;
+  for (const z of CONFIG.radarZoomCandidates) {
+    const ok = await radarZoomUsable(cfg.host, frames[frames.length - 1].path, z);
+    if (ok === null) break;                 // nicht messbar -> unten behandelt
+    probed = true;
+    if (ok) { nativeZoom = z; break; }
+  }
+  if (nativeZoom === null) {
+    clearRadarLayers();
+    radar.mode = null;
+    if (probed) {
+      // Gemessen und keine Stufe brauchbar: lieber nichts zeigen als
+      // "Zoom Level Not Supported" über die halbe Karte zu legen.
+      $("#radar-label").textContent = "Radar nicht verfügbar";
+      $("#radar-src").textContent = "Radar: keine Kacheln verfügbar";
+      diag.set("Radar", false, "keine nutzbare Zoomstufe");
+      return;
+    }
+    // Nicht messbar (z.B. kein CORS): konservativste Stufe versuchen
+    nativeZoom = CONFIG.radarZoomCandidates[CONFIG.radarZoomCandidates.length - 1];
+  }
+
   clearRadarLayers();
   radar.mode = "rainviewer";
   radar.frames = frames;
   radar.layers = frames.map((f) =>
     L.tileLayer(`${cfg.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`,
-      { opacity: 0, maxNativeZoom: CONFIG.radarMaxNativeZoom }).addTo(map));
+      { opacity: 0, maxNativeZoom: nativeZoom }).addTo(map));
   radar.idx = 0;
 
   const lastPastIdx = cfg.radar.past.slice(-7).length - 1;
@@ -807,7 +869,7 @@ async function initRainviewerRadar() {
     radar.idx = (radar.idx + 1) % radar.frames.length;
   }, CONFIG.radarFrameMs);
   $("#radar-src").textContent = "Radar: RainViewer (Fallback)";
-  diag.set("Radar", true, `RainViewer · ${frames.length} Bilder`);
+  diag.set("Radar", true, `RainViewer · ${frames.length} Bilder · Zoom ${nativeZoom}`);
 }
 
 async function refreshRadar() {

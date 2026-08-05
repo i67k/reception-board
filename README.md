@@ -106,6 +106,17 @@ OGD-Rohdaten (GeoTIFF). Lösung im Frontend:
    ohne Key, CORS-offen) mit animierter letzter Stunde + 30 min Nowcast. Die
    Radar-Quelle wird in der Fusszeile transparent ausgewiesen.
 
+**RainViewer und Zoomstufen:** RainViewer liefert Radarkacheln nur bis zu
+einer bestimmten Zoomstufe; darüber kommt ein Platzhalterbild
+("Zoom Level Not Supported"), das sich sonst über die Karte legt. Welche
+Stufe noch echte Kacheln liefert, misst die Seite beim Start selbst: Das
+Platzhalterbild ist für jede Kachel byte-identisch und deutlich grösser als
+eine leere, regenfreie Kachel — zwei verschiedene Kacheln mit exakt gleicher
+Grösse sind also der Platzhalter. Getestet wird von scharf nach grob
+(`CONFIG.radarZoomCandidates`); greift keine Stufe, bleibt das Radar
+abgeschaltet statt Platzhalter anzuzeigen. Die gewählte Stufe steht im
+Diagnose-Overlay (Taste `d`), z.B. `RainViewer · 10 Bilder · Zoom 7`.
+
 **CORS/Proxy:** Kein Proxy nötig. Kartenkacheln laden als `<img>` (CORS
 irrelevant); transport.opendata.ch, Open-Meteo und RainViewer senden
 `Access-Control-Allow-Origin: *`.
