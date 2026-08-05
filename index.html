@@ -7,228 +7,280 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <style>
+  /* ======================================================================
+   * Helles Layout: weisse Fläche, Hellblau als einzige Akzentfarbe.
+   * Bewusst wenige Kästen — getrennt wird über Haarlinien und Weissraum,
+   * Hierarchie über Schriftgrösse. Farbe trägt Bedeutung (Verspätung,
+   * Niederschlagsart), nicht Dekoration.
+   * ==================================================================== */
   :root {
-    --bg: #0e1318;
-    --card: #171e26;
-    --card-edge: #232d38;
-    --text: #e8edf2;
-    --muted: #8a97a5;
-    --ok: #3ddc84;
-    --warn: #ffb020;
-    --alert: #ff4d5e;
-    --accent: #4da3ff;
-    /* Niederschlagsarten — je Art eine eigene Farbe, damit der Balken
-       nicht nur "wie viel" sondern auch "was" zeigt. */
-    --p-rain:  #4da3ff;
-    --p-snow:  #cfe8ff;
-    --p-ice:   #34d9c6;
-    --p-storm: #a874ff;
+    --bg:         #ffffff;
+    --surface:    #f3f8fd;
+    --ink:        #0f2739;   /* Haupttext, kein reines Schwarz */
+    --ink-2:      #33556f;
+    --muted:      #7893a9;
+    --line:       #e3edf6;
+    --accent:     #1b8ef2;
+    --accent-100: #e8f3fe;
+    --warn:       #b06a00;
+    --warn-100:   #fff3df;
+    --alert:      #d22d43;
+    --alert-100:  #fdebee;
+    /* Niederschlagsarten */
+    --p-rain:  #1b8ef2;
+    --p-snow:  #5c82a6;
+    --p-ice:   #00b09a;
+    --p-storm: #7b5cf0;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
     background: var(--bg);
-    color: var(--text);
+    color: var(--ink);
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 17px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    cursor: none; /* Kiosk: kein Mauszeiger */
+    cursor: none;                        /* Kiosk: kein Mauszeiger */
+    -webkit-font-smoothing: antialiased;
   }
 
   /* ---------- Kopfzeile ---------- */
   header {
     display: flex;
     align-items: center;
-    gap: 1.2rem;
-    padding: 0.7rem 1.4rem;
-    border-bottom: 1px solid var(--card-edge);
+    gap: 1.5rem;
+    padding: 1.1rem 2rem 0.9rem;
+    border-bottom: 1px solid var(--line);
   }
-  header h1 { font-size: 1.25rem; font-weight: 600; white-space: nowrap; }
-  #global-status {
-    flex: 1;
-    text-align: center;
-    font-size: 1.35rem;
-    font-weight: 600;
-    padding: 0.45rem 1rem;
-    border-radius: 0.6rem;
-  }
-  #global-status.ok    { color: var(--ok);    background: rgba(61,220,132,0.08); }
-  #global-status.warn  { color: var(--warn);  background: rgba(255,176,32,0.12); }
-  #global-status.alert { color: var(--alert); background: rgba(255,77,94,0.14); animation: pulse 2s infinite; }
-  @keyframes pulse { 50% { background: rgba(255,77,94,0.30); } }
-  #clock { font-size: 1.9rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .brand { display: flex; align-items: baseline; gap: 0.55rem; white-space: nowrap; }
+  .brand b { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; }
+  .brand span { font-size: 0.82rem; color: var(--muted); }
 
-  /* ---------- Hauptbereich ---------- */
+  /* Normalbetrieb bleibt bewusst unscheinbar, Störungen springen an */
+  #global-status {
+    flex: 1; text-align: center;
+    font-size: 1.05rem; font-weight: 600; color: var(--muted);
+    padding: 0.35rem 0.9rem; border-radius: 999px;
+    transition: background 0.4s;
+  }
+  #global-status.warn  { color: var(--warn);  background: var(--warn-100); }
+  #global-status.alert { color: var(--alert); background: var(--alert-100); }
+
+  #clock {
+    font-size: 2.3rem; font-weight: 300; letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink);
+  }
+
+  /* ---------- Hauptbereich: zwei Spalten, getrennt durch eine Linie ---------- */
   main {
     flex: 1;
     display: grid;
-    grid-template-columns: 11fr 9fr;
-    gap: 0.9rem;
-    padding: 0.9rem 1.4rem;
+    grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
     min-height: 0;
   }
-  #stops { display: flex; flex-direction: column; gap: 0.9rem; min-height: 0; }
-
-  .card {
-    background: var(--card);
-    border: 1px solid var(--card-edge);
-    border-radius: 0.8rem;
-    padding: 0.8rem 1rem;
-    display: flex;
-    flex-direction: column;
+  #stops {
+    display: flex; flex-direction: column;
+    padding: 0.4rem 2rem 0.6rem;
     min-height: 0;
-    overflow: hidden;
   }
-  .card.stale { border-color: var(--alert); }
+  #right {
+    display: flex; flex-direction: column;
+    border-left: 1px solid var(--line);
+    padding: 1rem 2rem 0.6rem;
+    gap: 1rem; min-height: 0;
+  }
 
-  .stop-card { flex: 1; }
-  .stop-head { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.4rem; }
-  .stop-head h2 { font-size: 1.25rem; font-weight: 600; }
-  .stop-status { font-size: 0.95rem; font-weight: 600; margin-left: auto; display: flex; align-items: center; gap: 0.4rem; }
-  .stop-status .dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; }
-  .stop-status.ok    { color: var(--muted); } .stop-status.ok .dot    { background: var(--ok); }
-  .stop-status.warn  { color: var(--warn); }  .stop-status.warn .dot  { background: var(--warn); }
-  .stop-status.alert { color: var(--alert); } .stop-status.alert .dot { background: var(--alert); }
-  .stop-meta { font-size: 0.8rem; color: var(--muted); }
+  /* ---------- Haltestellen: Abschnitte statt Karten ---------- */
+  .stop-card {
+    flex: 1; display: flex; flex-direction: column;
+    padding: 1rem 0 0.3rem; min-height: 0;
+    border-top: 1px solid var(--line);
+  }
+  .stop-card:first-child { border-top: 0; }
+  .stop-card.stale { opacity: 0.55; }
 
-  /* max-width hält Ziel und Zahlen zusammen: ohne sie driften die
-     Minuten auf breiten Screens weit vom Haltestellennamen weg. */
-  table.deps { width: 100%; max-width: 44rem; border-collapse: collapse; font-size: 1.15rem; }
-  table.deps td, table.deps th { padding: 0.28rem 0.3rem; vertical-align: middle; white-space: nowrap; }
+  .stop-head { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.55rem; }
+  .stop-head h2 {
+    font-size: 1.3rem; font-weight: 650; letter-spacing: -0.015em; color: var(--ink);
+  }
+  .stop-meta { font-size: 0.76rem; color: var(--muted); }
+  .stop-status {
+    margin-left: auto; font-size: 0.85rem; font-weight: 600;
+    display: flex; align-items: center; gap: 0.42rem;
+    padding: 0.16rem 0.6rem; border-radius: 999px;
+  }
+  .stop-status .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+  .stop-status.ok    { color: var(--muted); }
+  .stop-status.ok .dot    { background: #35c17e; }
+  .stop-status.warn  { color: var(--warn);  background: var(--warn-100); }
+  .stop-status.warn .dot  { background: var(--warn); }
+  .stop-status.alert { color: var(--alert); background: var(--alert-100); }
+  .stop-status.alert .dot { background: var(--alert); }
+
+  /* ---------- Abfahrtstabelle ---------- */
+  table.deps { width: 100%; max-width: 40rem; border-collapse: collapse; font-size: 1.18rem; }
+  table.deps td, table.deps th { padding: 0.3rem 0.35rem; white-space: nowrap; vertical-align: middle; }
   table.deps th {
-    font-size: 0.72rem; font-weight: 500; color: var(--muted);
-    text-transform: uppercase; letter-spacing: 0.06em; padding-bottom: 0.1rem;
+    font-size: 0.68rem; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.08em; padding-bottom: 0.25rem;
   }
-  th.h-delay, th.h-count, th.h-time { text-align: right; }
-  td.line, th.h-line { width: 3.6rem; }
-  .badge {
-    display: inline-block; min-width: 2.9rem; text-align: center;
-    padding: 0.1rem 0.4rem; border-radius: 0.4rem;
-    background: #2a3542; font-weight: 700; font-size: 1.05rem;
-  }
-  /* Ziel füllt die Restbreite und kürzt lange Namen mit "…" ab. */
-  td.dest { overflow: hidden; text-overflow: ellipsis; max-width: 0; width: 100%; white-space: nowrap; }
-  /* Verspätung steht rechts neben der Abfahrtszeit: "15:29  +2′" */
-  td.delay, th.h-delay { text-align: left; font-weight: 700; width: 3.4rem; padding-left: 0.5rem; }
-  tr.warn  td.delay { color: var(--warn); }
-  tr.alert td.delay { color: var(--alert); }
-  tr.alert td.dest, tr.alert td.line .badge { color: var(--alert); }
-  td.count, th.h-count { text-align: right; font-weight: 700; width: 4rem; font-variant-numeric: tabular-nums; }
-  td.time,  th.h-time  { text-align: right; width: 4rem; font-variant-numeric: tabular-nums; }
-  td.time { color: var(--muted); }
-  tr.warn td.time, tr.alert td.time { color: var(--text); }
-  .empty-msg { color: var(--muted); font-size: 1rem; padding: 0.6rem 0.2rem; }
+  th.h-count, th.h-time, th.h-delay { text-align: right; }
+  th.h-delay { text-align: left; padding-left: 0.6rem; }
 
-  /* ---------- Rechte Spalte ---------- */
-  #right { display: flex; flex-direction: column; gap: 0.9rem; min-height: 0; }
-  #map-card { flex: 5; padding: 0; position: relative; }
-  #map { position: absolute; inset: 0; border-radius: 0.8rem; background: #0a0e12; }
-  #radar-label {
-    position: absolute; z-index: 1000; top: 0.6rem; right: 0.6rem;
-    background: rgba(14,19,24,0.85); border: 1px solid var(--card-edge);
-    padding: 0.25rem 0.6rem; border-radius: 0.5rem;
-    font-size: 0.85rem; font-variant-numeric: tabular-nums;
+  td.line, th.h-line { width: 3.9rem; }
+  .badge {
+    display: inline-block; min-width: 3rem; text-align: center;
+    padding: 0.14rem 0.45rem; border-radius: 0.35rem;
+    background: var(--accent-100); color: var(--accent);
+    font-weight: 700; font-size: 1rem; letter-spacing: -0.01em;
   }
-  #radar-label .nowcast { color: var(--accent); }
-  #radar-label .rl-time { font-weight: 700; }
+  td.dest {
+    overflow: hidden; text-overflow: ellipsis; max-width: 0; width: 100%;
+    color: var(--ink-2); font-weight: 500;
+  }
+  td.count, th.h-count {
+    text-align: right; width: 4.1rem; font-weight: 700;
+    font-variant-numeric: tabular-nums; color: var(--ink);
+  }
+  td.time, th.h-time {
+    text-align: right; width: 4.3rem; font-variant-numeric: tabular-nums;
+    color: var(--ink); font-weight: 500;
+  }
+  td.delay, th.h-delay {
+    text-align: left; width: 3.6rem; padding-left: 0.6rem; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  tr.warn  td.delay { color: var(--warn); }
+  tr.alert td.delay, tr.alert td.time, tr.alert td.count { color: var(--alert); }
+  tr.alert td.dest { color: var(--alert); }
+  tr.alert .badge  { background: var(--alert-100); color: var(--alert); }
+  .empty-msg { color: var(--muted); font-size: 0.95rem; padding: 0.5rem 0.2rem; }
+
+  /* ---------- Karte ---------- */
+  #map-card { flex: 1; position: relative; min-height: 0; }
+  #map {
+    position: absolute; inset: 0; border-radius: 0.9rem;
+    background: var(--surface); border: 1px solid var(--line);
+  }
+  #radar-label {
+    position: absolute; z-index: 1000; top: 0.7rem; right: 0.7rem;
+    background: rgba(255,255,255,0.94); border: 1px solid var(--line);
+    padding: 0.32rem 0.7rem; border-radius: 0.5rem;
+    font-size: 0.82rem; font-variant-numeric: tabular-nums; color: var(--ink-2);
+    box-shadow: 0 2px 10px rgba(15,39,57,0.07);
+  }
+  #radar-label .rl-time { font-weight: 700; color: var(--ink); }
   #radar-label .rl-rel { color: var(--muted); }
+  #radar-label .nowcast { color: var(--accent); font-weight: 600; }
   #radar-label .rl-bar {
-    display: block; height: 3px; margin-top: 0.35rem;
-    background: #2a3542; border-radius: 2px; overflow: hidden;
+    display: block; height: 2px; margin-top: 0.4rem;
+    background: var(--line); border-radius: 2px; overflow: hidden;
   }
   #radar-label .rl-bar i { display: block; height: 100%; background: var(--accent); }
 
-  #weather-card { flex: 3; }
+  /* ---------- Wetter ---------- */
+  #weather-card { display: flex; flex-direction: column; padding-top: 0.9rem; border-top: 1px solid var(--line); }
   #weather-head { display: flex; align-items: baseline; gap: 0.7rem; }
-  #weather-head h2 { font-size: 1.1rem; font-weight: 600; }
-  #weather-head .src { margin-left: auto; font-size: 0.75rem; color: var(--muted); }
-  #weather-body { flex: 1; display: flex; align-items: center; gap: 1.6rem; margin-top: 0.3rem; }
-  #w-icon { line-height: 0; flex: none; }
-  #w-temp { font-size: 3.2rem; font-weight: 700; }
-  #w-temp small { font-size: 1.1rem; color: var(--muted); font-weight: 400; display: block; }
-  #w-rain { flex: 1; }
-  #w-rain .headline { font-size: 1.35rem; font-weight: 600; }
-  #w-rain .headline.rain { color: var(--accent); }
-  #w-rain .detail { font-size: 0.95rem; color: var(--muted); margin-top: 0.25rem; }
-
-  /* Tagesverlauf: eine Spalte je Stunde, Balkenhöhe = Regenwahrscheinlichkeit */
-  #w-hours {
-    display: flex; gap: 0.25rem; align-items: flex-end;
-    margin-top: 0.5rem; padding-top: 0.7rem;
-    border-top: 1px solid var(--card-edge);
+  #weather-head h2 {
+    font-size: 0.72rem; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.09em;
   }
-  .wh { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; min-width: 0; }
-  .wh.now { background: rgba(77,163,255,0.10); border-radius: 0.4rem; padding: 0.2rem 0; }
-  .wh .h-time { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .wh.now .h-time { color: var(--accent); font-weight: 700; }
-  .wh .h-icon { line-height: 0; }
-  .wh .h-temp { font-size: 0.95rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #weather-head .src { margin-left: auto; font-size: 0.7rem; color: var(--muted); }
+
+  #weather-body { display: flex; align-items: center; gap: 1.3rem; margin-top: 0.5rem; }
+  #w-icon { line-height: 0; flex: none; }
+  #w-temp {
+    font-size: 3.4rem; font-weight: 250; letter-spacing: -0.04em; line-height: 1;
+    color: var(--ink); flex: none;
+  }
+  #w-temp small {
+    display: block; font-size: 0.82rem; font-weight: 500; color: var(--muted);
+    letter-spacing: 0; margin-top: 0.25rem;
+  }
+  #w-rain { flex: 1; min-width: 0; }
+  #w-rain .headline { font-size: 1.22rem; font-weight: 650; letter-spacing: -0.015em; }
+  #w-rain .headline.rain { color: var(--accent); }
+  #w-rain .detail { font-size: 0.85rem; color: var(--muted); margin-top: 0.3rem; line-height: 1.45; }
+
+  /* Tagesverlauf: Balkenhöhe = Wahrscheinlichkeit, Farbe = Art */
+  #w-hours { display: flex; gap: 0.3rem; align-items: flex-end; margin-top: 0.9rem; }
+  .wh {
+    flex: 1; min-width: 0; display: flex; flex-direction: column;
+    align-items: center; gap: 0.2rem; padding: 0.3rem 0; border-radius: 0.45rem;
+  }
+  .wh.now { background: var(--accent-100); }
+  .wh .h-pct { font-size: 0.68rem; font-variant-numeric: tabular-nums; color: var(--muted); }
   .wh .h-bar {
-    width: 100%; max-width: 1.5rem; height: 2.6rem; background: #1e2732;
+    width: 100%; max-width: 1.4rem; height: 2.4rem; background: var(--surface);
     border-radius: 0.2rem; display: flex; align-items: flex-end; overflow: hidden;
   }
   .wh .h-bar i { display: block; width: 100%; }
-  .wh .h-pct { font-size: 0.7rem; font-variant-numeric: tabular-nums; color: var(--muted); }
-  /* Farbe nach Niederschlagsart; ohne konkrete Art bleibt es blau,
-     aber gedimmt — die Balkenhöhe trägt dann die Aussage allein. */
+  .wh .h-icon { line-height: 0; }
+  .wh .h-temp { font-size: 0.92rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .wh .h-time { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .wh.now .h-time { color: var(--accent); font-weight: 700; }
+
   .k-rain  { background: var(--p-rain);  }
   .k-snow  { background: var(--p-snow);  }
   .k-ice   { background: var(--p-ice);   }
   .k-storm { background: var(--p-storm); }
-  .k-none  { background: var(--p-rain); opacity: 0.4; }
+  .k-none  { background: var(--p-rain); opacity: 0.22; }
   .wh .h-pct.t-rain  { color: var(--p-rain);  font-weight: 700; }
   .wh .h-pct.t-snow  { color: var(--p-snow);  font-weight: 700; }
   .wh .h-pct.t-ice   { color: var(--p-ice);   font-weight: 700; }
   .wh .h-pct.t-storm { color: var(--p-storm); font-weight: 700; }
 
-  /* Wettersymbole: Wolke neutral, Niederschlag in der Farbe seiner Art —
-     dieselbe Zuordnung wie bei den Balken darüber. */
+  /* Wettersymbole: Wolke neutral, Niederschlag in der Farbe seiner Art */
   .wi { display: block; }
-  .wi .i-cloud { fill: #9fb0c2; }
-  .wi .i-sun { fill: #ffc247; }
+  .wi .i-cloud { fill: #a8bccd; }
+  .wi .i-sun { fill: #f6a821; }
   .wi .i-ray, .wi .i-rain, .wi .i-snow, .wi .i-ice, .wi .i-fog {
     fill: none; stroke-width: 1.7; stroke-linecap: round;
   }
-  .wi .i-ray  { stroke: #ffc247; }
+  .wi .i-ray  { stroke: #f6a821; }
   .wi .i-rain { stroke: var(--p-rain); }
   .wi .i-snow { stroke: var(--p-snow); }
   .wi .i-ice  { stroke: var(--p-ice); }
-  .wi .i-fog  { stroke: #9fb0c2; }
+  .wi .i-fog  { stroke: #a8bccd; }
   .wi .i-hail { fill: var(--p-storm); }
-  .wi .i-bolt { fill: #ffd23f; }
+  .wi .i-bolt { fill: #f6a821; }
 
-  #w-legend { display: flex; gap: 0.9rem; margin-top: 0.45rem; font-size: 0.72rem; color: var(--muted); }
-  #w-legend span { display: flex; align-items: center; gap: 0.3rem; }
-  #w-legend i { width: 0.6rem; height: 0.6rem; border-radius: 0.15rem; display: inline-block; }
+  #w-legend { display: flex; gap: 1rem; margin-top: 0.55rem; font-size: 0.7rem; color: var(--muted); }
+  #w-legend span { display: flex; align-items: center; gap: 0.32rem; }
+  #w-legend i { width: 0.55rem; height: 0.55rem; border-radius: 0.12rem; display: inline-block; }
 
+  /* ---------- Fusszeile ---------- */
   footer {
-    display: flex; gap: 1rem;
-    padding: 0.4rem 1.4rem;
-    font-size: 0.75rem; color: var(--muted);
-    border-top: 1px solid var(--card-edge);
+    display: flex; gap: 1.4rem; align-items: center;
+    padding: 0.55rem 2rem; font-size: 0.7rem; color: var(--muted);
+    border-top: 1px solid var(--line);
   }
   footer .right { margin-left: auto; }
-  #net-warn { color: var(--alert); font-weight: 600; display: none; }
+  #net-warn { color: var(--alert); font-weight: 700; display: none; }
 
-  /* Diagnose-Overlay (?debug oder Taste "d") */
+  /* ---------- Diagnose (?debug oder Taste "d") ---------- */
   #diag {
-    display: none; position: fixed; z-index: 2000; left: 1.4rem; bottom: 2.4rem;
-    background: rgba(10,14,18,0.96); border: 1px solid var(--card-edge);
-    border-radius: 0.6rem; padding: 0.7rem 0.9rem; font-size: 0.85rem;
-    min-width: 22rem; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    display: none; position: fixed; z-index: 2000; left: 2rem; bottom: 2.6rem;
+    background: #fff; border: 1px solid var(--line); border-radius: 0.7rem;
+    padding: 0.8rem 1rem; font-size: 0.82rem; min-width: 23rem;
+    box-shadow: 0 10px 32px rgba(15,39,57,0.14);
   }
-  #diag b { display: block; margin-bottom: 0.4rem; }
-  #diag div { display: flex; gap: 0.6rem; padding: 0.12rem 0; }
+  #diag b {
+    display: block; margin-bottom: 0.5rem; font-size: 0.68rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.09em;
+  }
+  #diag div { display: flex; gap: 0.6rem; padding: 0.16rem 0; }
   #diag span { margin-left: auto; color: var(--muted); }
-  #diag .d-ok { color: var(--ok); }
+  #diag .d-ok { color: #1a9c62; }
   #diag .d-fail { color: var(--alert); }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>ÖV &amp; Wetter</h1>
+  <div class="brand"><b>ÖV &amp; Wetter</b><span>Zürich West</span></div>
   <div id="global-status" class="ok">…</div>
   <div id="clock">--:--</div>
 </header>
@@ -236,13 +288,13 @@
 <main>
   <section id="stops"></section>
   <section id="right">
-    <div class="card" id="map-card">
+    <div id="map-card">
       <div id="map"></div>
       <div id="radar-label">Radar lädt…</div>
     </div>
-    <div class="card" id="weather-card">
+    <div id="weather-card">
       <div id="weather-head">
-        <h2>Wetter Zürich West</h2>
+        <h2>Wetter</h2>
         <span class="src">Source: MeteoSwiss</span>
       </div>
       <div id="weather-body">
@@ -456,7 +508,10 @@ function renderStops() {
   for (const stop of CONFIG.stops) {
     const st = stopState[stop.key] || {};
     const card = document.createElement("div");
-    card.className = "card stop-card";
+    card.className = "stop-card";
+    // Höhe nach Zeilenanzahl verteilen statt zu dritteln, sonst klafft
+    // unter der kürzesten Haltestelle unnötig Leerraum.
+    card.style.flexGrow = String(stop.rows);
 
     let deps = (st.journeys || []).map(toDeparture)
       .filter((d) => d.effective > now - 30_000)
@@ -734,10 +789,11 @@ const map = L.map("map", {
 
 L.tileLayer(
   "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg",
-  { maxZoom: 18, opacity: 0.75 }).addTo(map);
+  { maxZoom: 18, opacity: 0.9 }).addTo(map);
 
+// Standort Rezeption
 L.circleMarker([CONFIG.home.lat, CONFIG.home.lon], {
-  radius: 7, color: "#4da3ff", fillColor: "#4da3ff", fillOpacity: 0.9,
+  radius: 6, weight: 3, color: "#ffffff", fillColor: "#1b8ef2", fillOpacity: 1,
 }).addTo(map);
 
 /** Testet per GetMap-Bild, ob ein WMS-Layer auf wms.geo.admin.ch existiert. */
