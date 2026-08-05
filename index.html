@@ -170,14 +170,16 @@
 
   /* Hinweis, wenn im Kartenausschnitt gar kein Niederschlag liegt —
      sonst ist eine leere Karte nicht von einer kaputten zu unterscheiden. */
-  #radar-empty {
+  #radar-empty, #radar-note {
     display: none; position: absolute; z-index: 1000;
-    left: 50%; bottom: 0.9rem; transform: translateX(-50%);
+    left: 50%; transform: translateX(-50%);
     background: rgba(255,255,255,0.94); border: 1px solid var(--line);
     padding: 0.35rem 0.85rem; border-radius: 999px;
-    font-size: 0.82rem; color: var(--ink-2);
+    font-size: 0.82rem; color: var(--ink-2); white-space: nowrap;
     box-shadow: 0 2px 10px rgba(15,39,57,0.07);
   }
+  #radar-empty { bottom: 0.9rem; }
+  #radar-note  { bottom: 3rem; color: var(--warn); border-color: #f0dcb4; }
 
   #radar-label {
     position: absolute; z-index: 1000; top: 0.7rem; right: 0.7rem;
@@ -326,6 +328,7 @@
       <div id="map"></div>
       <div id="radar-label">Radar lädt…</div>
       <div id="radar-empty">Aktuell kein Niederschlag im Kartenausschnitt</div>
+      <div id="radar-note"></div>
     </div>
     <div id="rain-timeline"></div>
     <div id="weather-card">
@@ -1026,10 +1029,30 @@ async function initRainviewerRadar() {
   radar.idx = 0;
 
   // Ohne Niederschlag bleibt die Karte leer — das sieht aus wie ein Fehler.
-  // Deshalb prüfen und den Zustand benennen. Geprüft wird das letzte Bild
-  // der Animation, also die weiteste Prognose.
-  const wet = await radarHasPrecip(cfg.host, frames[frames.length - 1].path, nativeZoom);
+  // Geprüft wird das JÜNGSTE Beobachtungsbild ("regnet es gerade"), nicht
+  // die weiteste Prognose: eine trockene Vorhersage würde sonst melden,
+  // es sei gar kein Niederschlag da, obwohl es gerade regnet.
+  const newest = past[past.length - 1] || frames[frames.length - 1];
+  const wet = await radarHasPrecip(cfg.host, newest.path, nativeZoom);
   $("#radar-empty").style.display = wet === false ? "block" : "none";
+
+  // Für die Diagnose: reicht die Prognose überhaupt in die Zukunft?
+  const fmtOr = (f) => (f ? fmtTime(new Date(f.time * 1000)) : "–");
+  const lastNow = nowcast[nowcast.length - 1];
+  const aheadMin = lastNow
+    ? Math.round((lastNow.time * 1000 - Date.now()) / 60_000) : null;
+  const radarInfo = nowcast.length
+    ? `Verlauf bis ${fmtOr(past[past.length - 1])}, `
+      + `Prognose bis ${fmtOr(lastNow)} (${aheadMin >= 0 ? "+" : ""}${aheadMin} min) · Zoom ${nativeZoom}`
+    : `Verlauf bis ${fmtOr(past[past.length - 1])} · keine Prognose geliefert · Zoom ${nativeZoom}`;
+
+  // Prognose fehlt oder liegt bereits in der Vergangenheit -> benennen,
+  // statt den Eindruck zu lassen, die Zukunft werde einfach nicht gezeigt.
+  const forecastUseless = !nowcast.length || aheadMin <= 0;
+  $("#radar-note").style.display = forecastUseless ? "block" : "none";
+  $("#radar-note").textContent = nowcast.length
+    ? "Prognosebilder von RainViewer sind bereits abgelaufen"
+    : "RainViewer liefert derzeit keine Prognosebilder";
 
   const lastPastIdx = past.length - 1;
   const step = () => {
@@ -1055,8 +1078,7 @@ async function initRainviewerRadar() {
   };
   step();
   $("#radar-src").textContent = "Radar: RainViewer (Fallback)";
-  diag.set("Radar", true,
-    `RainViewer · ${past.length} Verlauf + ${nowcast.length} Prognose · Zoom ${nativeZoom}`);
+  diag.set("Radar", !forecastUseless, radarInfo);
 }
 
 async function refreshRadar() {
