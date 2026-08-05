@@ -164,9 +164,20 @@
     position: absolute; inset: 0; border-radius: 0.9rem;
     background: var(--surface); border: 1px solid var(--line);
   }
-  /* Nur die Basiskarte entsättigen, nicht die Radarflächen darüber —
-     deshalb hängt der Filter am Kachel-Container dieser einen Ebene. */
-  .basemap-tint { filter: saturate(0.62) brightness(1.06) contrast(0.94); }
+  /* Farbstärke wirkt nur auf die Basiskarte, nicht auf die Radarflächen
+     darüber — deshalb hängt der Filter am Kachel-Container dieser Ebene. */
+  .basemap-tint { filter: saturate(var(--basemap-sat, 1)); }
+
+  /* Hinweis, wenn im Kartenausschnitt gar kein Niederschlag liegt —
+     sonst ist eine leere Karte nicht von einer kaputten zu unterscheiden. */
+  #radar-empty {
+    display: none; position: absolute; z-index: 1000;
+    left: 50%; bottom: 0.9rem; transform: translateX(-50%);
+    background: rgba(255,255,255,0.94); border: 1px solid var(--line);
+    padding: 0.35rem 0.85rem; border-radius: 999px;
+    font-size: 0.82rem; color: var(--ink-2);
+    box-shadow: 0 2px 10px rgba(15,39,57,0.07);
+  }
 
   #radar-label {
     position: absolute; z-index: 1000; top: 0.7rem; right: 0.7rem;
@@ -314,6 +325,7 @@
     <div id="map-card">
       <div id="map"></div>
       <div id="radar-label">Radar lädt…</div>
+      <div id="radar-empty">Aktuell kein Niederschlag im Kartenausschnitt</div>
     </div>
     <div id="rain-timeline"></div>
     <div id="weather-card">
@@ -375,10 +387,10 @@ const CONFIG = {
   mapZoom: 9,
   // Basiskarte von swisstopo. "farbe" = Landeskarte in Farbe (Wald grün,
   // Seen blau), "grau" = neutrale Graustufen, "luftbild" = Satellitenbild.
-  // basemapTint entsättigt die Kacheln leicht, damit die Radarflächen
-  // darüber nicht mit den Kartenfarben konkurrieren.
+  // basemapSaturation regelt die Farbstärke: 1 = Original, darunter
+  // blasser, darüber kräftiger.
   basemap: "farbe",
-  basemapTint: true,
+  basemapSaturation: 1.15,
   basemaps: {
     farbe:    "ch.swisstopo.pixelkarte-farbe",
     grau:     "ch.swisstopo.pixelkarte-grau",
@@ -406,6 +418,7 @@ const CONFIG = {
   radarFrameMs:     700,                 // Animationstempo je Bild
   radarHoldMs:      2600,                // Standzeit auf dem letzten Prognosebild
   radarOpacity:     0.75,                // Deckkraft der Radarflächen
+  emptyTileMaxBytes: 800,                // darunter gilt eine Radarkachel als leer
   staleAfterMs:     5 * 60_000,          // ab wann Daten als veraltet gelten
 
   delayWarnMin:  2,                      // gelb ab X Minuten Verspätung
@@ -874,9 +887,10 @@ const map = L.map("map", {
 }).setView([CONFIG.home.lat, CONFIG.home.lon], CONFIG.mapZoom);
 
 const baseLayer = CONFIG.basemaps[CONFIG.basemap] || CONFIG.basemaps.grau;
+document.documentElement.style.setProperty("--basemap-sat", CONFIG.basemapSaturation);
 L.tileLayer(
   `https://wmts.geo.admin.ch/1.0.0/${baseLayer}/default/current/3857/{z}/{x}/{y}.jpeg`,
-  { maxZoom: 18, className: CONFIG.basemapTint ? "basemap-tint" : "" }).addTo(map);
+  { maxZoom: 18, className: "basemap-tint" }).addTo(map);
 
 // Standort Rezeption
 L.circleMarker([CONFIG.home.lat, CONFIG.home.lon], {
@@ -958,6 +972,21 @@ async function radarZoomUsable(host, path, z) {
   return !(s1 === s2 && s1 > 1500);
 }
 
+/**
+ * Liegt im Kartenausschnitt überhaupt Niederschlag? Eine vollständig
+ * transparente Radarkachel ist nur wenige hundert Byte gross, eine mit
+ * Regenflächen ein Vielfaches davon. Geprüft werden die vier Kacheln um
+ * den Standort. Rückgabe null = nicht feststellbar (z.B. kein CORS).
+ */
+async function radarHasPrecip(host, path, z) {
+  const a = lonLatToTile(CONFIG.home.lon, CONFIG.home.lat, z);
+  const urls = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([dx, dy]) =>
+    `${host}${path}/256/${z}/${a.x + dx}/${a.y + dy}/2/1_1.png`);
+  const sizes = await Promise.all(urls.map(tileByteSize));
+  if (sizes.some((s) => s == null)) return null;
+  return sizes.some((s) => s > CONFIG.emptyTileMaxBytes);
+}
+
 /** Fallback: RainViewer-Radarkacheln, letzte Stunde + 30 min Nowcast, animiert. */
 async function initRainviewerRadar() {
   const cfg = await fetchJson("https://api.rainviewer.com/public/weather-maps.json");
@@ -995,6 +1024,12 @@ async function initRainviewerRadar() {
     L.tileLayer(`${cfg.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`,
       { opacity: 0, maxNativeZoom: nativeZoom }).addTo(map));
   radar.idx = 0;
+
+  // Ohne Niederschlag bleibt die Karte leer — das sieht aus wie ein Fehler.
+  // Deshalb prüfen und den Zustand benennen. Geprüft wird das letzte Bild
+  // der Animation, also die weiteste Prognose.
+  const wet = await radarHasPrecip(cfg.host, frames[frames.length - 1].path, nativeZoom);
+  $("#radar-empty").style.display = wet === false ? "block" : "none";
 
   const lastPastIdx = past.length - 1;
   const step = () => {

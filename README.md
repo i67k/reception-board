@@ -156,12 +156,23 @@ Im Diagnose-Overlay steht die tatsächliche Aufteilung, z.B.
 | `grau` | neutrale Graustufen, Radar hebt sich am stärksten ab |
 | `luftbild` | Satellitenbild (SWISSIMAGE) |
 
-`CONFIG.basemapTint: true` entsättigt die Kacheln leicht
-(`saturate(0.62) brightness(1.06)`), damit die farbigen Radarflächen nicht
-mit den Kartenfarben konkurrieren. Der Filter hängt gezielt am Kachel-
-Container der Basiskarte, nicht am gemeinsamen Layer-Pane — die
-Radarflächen bleiben also unverfälscht. Auf `false` gesetzt zeigt die Karte
-die Originalfarben von swisstopo.
+`CONFIG.basemapSaturation` regelt die Farbstärke: `1` = Originalfarben von
+swisstopo, darunter blasser, darüber kräftiger (Standard `1.15`). Der Filter
+hängt gezielt am Kachel-Container der Basiskarte, nicht am gemeinsamen
+Layer-Pane — die Radarflächen darüber bleiben also unverfälscht.
+
+Die farbige Landeskarte bringt swisstopos eigene Symbolik mit: **orange**
+Linien sind Autobahnen, **gelb** Hauptstrassen, **violett** gestrichelt die
+Kantons- und Landesgrenzen, schwarz die Bahnlinien. Das sind Kartenzeichen,
+keine Wetterdaten. Wer es ruhiger mag, nimmt `basemap: "grau"` — dann hebt
+sich das Radar am stärksten ab.
+
+**Leere Karte:** Liegt im Ausschnitt gar kein Niederschlag, blendet die
+Seite den Hinweis „Aktuell kein Niederschlag im Kartenausschnitt" ein. Ohne
+ihn ist eine regenfreie Karte nicht von einer defekten zu unterscheiden.
+Erkannt wird das über die Kachelgrösse: eine vollständig transparente
+Radarkachel ist nur wenige hundert Byte gross, eine mit Regenflächen ein
+Vielfaches davon (`CONFIG.emptyTileMaxBytes`).
 
 ## Standort und Datenschutz
 
