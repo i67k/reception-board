@@ -125,6 +125,36 @@ Diagnose-Overlay (Taste `d`), z.B. `RainViewer · 10 Bilder · Zoom 7`.
 irrelevant); transport.opendata.ch, Open-Meteo und RainViewer senden
 `Access-Control-Allow-Origin: *`.
 
+## Radar-Zeitumfang
+
+Die Animation spielt Vergangenheit und Prognose in einem Durchlauf:
+
+- **Vergangenheit:** RainViewer liefert Bilder im 10-Minuten-Takt, rund
+  2 Stunden zurück. `CONFIG.radarPastFrames` (Standard 12 = 2 h) steuert,
+  wie viele davon gezeigt werden.
+- **Zukunft:** bis zu 3 Prognosebilder, also rund **30 Minuten voraus** —
+  mehr gibt der freie Dienst nicht her. Abschaltbar über
+  `CONFIG.radarNowcast: false`, dann läuft nur der Verlauf.
+
+Prognosebilder sind im Label als „Prognose" markiert und blau eingefärbt.
+Im Diagnose-Overlay steht die tatsächliche Aufteilung, z.B.
+`RainViewer · 12 Verlauf + 3 Prognose · Zoom 7`.
+
+## Standort und Datenschutz
+
+Der blaue Punkt auf der Karte, der Kartenausschnitt und der Ort der
+Wetterabfrage kommen **ausschliesslich aus `CONFIG.home`** — festen
+Koordinaten im Code. Die Seite fragt **keine Standortfreigabe** an, nutzt
+keine Geolocation-API und misst keine Position. Sie weiss nur, was dort
+eingetragen ist. Für einen anderen Aufstellort einfach die beiden Werte
+ändern.
+
+Es werden ausserdem keine Personendaten verarbeitet, keine Cookies gesetzt
+und nichts an Dritte gemeldet; die Seite ruft nur die oben genannten
+öffentlichen Datenquellen ab. Einziger lokaler Speicher: die aufgelösten
+Haltestellen-IDs im `localStorage`, damit die Suche nicht bei jedem Start
+neu laufen muss.
+
 ## Konfiguration
 
 Alles Wesentliche steht im `CONFIG`-Block am Anfang des `<script>` in

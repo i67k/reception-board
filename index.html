@@ -340,7 +340,11 @@ const CONFIG = {
     { key: "hardbruecke", label: "Hardbrücke (Bahn)",  query: "Zürich Hardbrücke",          rows: 6,
       categories: ["S", "IR", "RE", "IC", "EC"] },
   ],
-  home: { lat: 47.3922, lon: 8.5180 },   // Ogilvy, Zürich West
+  // Fester Standort der Rezeption — hier eingetragen, NICHT vom Browser
+  // ermittelt. Es wird keine Standortfreigabe angefragt und keine Position
+  // gemessen; die Tafel weiss nur, was hier steht. Bestimmt den blauen
+  // Punkt auf der Karte, den Kartenausschnitt und den Wetter-Abfrageort.
+  home: { lat: 47.3922, lon: 8.5180 },   // Zürich West (Escher-Wyss)
   // Zoom 9 zeigt genug Umland, um aufziehenden Regen früh zu sehen.
   // Radarkacheln werden nur bis maxNativeZoom angefragt und darüber
   // hochskaliert — RainViewer liefert sonst "Zoom Level Not Supported".
@@ -352,6 +356,12 @@ const CONFIG = {
   // (~1 km) kaum auffällt. Die Liste wird von scharf nach grob geprüft,
   // falls sich das Limit ändert; greift keine Stufe, bleibt das Radar aus.
   radarZoomCandidates: [7, 6, 5],
+
+  // Zeitumfang der Radar-Animation. RainViewer liefert Vergangenheitsbilder
+  // im 10-Minuten-Takt (rund 2 Stunden zurück) und bis zu 3 Prognosebilder
+  // (rund 30 Minuten voraus) — mehr Zukunft gibt der freie Dienst nicht her.
+  radarPastFrames: 12,                   // Vergangenheit: 12 x 10 min = 2 h
+  radarNowcast: true,                    // Prognosebilder mitspielen
 
   refreshOevMs:     60_000,              // Abfahrten
   refreshWeatherMs: 10 * 60_000,         // Wetterzahlen
@@ -768,7 +778,7 @@ function renderHourly(hh, from) {
       <span class="h-bar"><i class="k-${kind.key}" style="height:${Math.max(p, 2)}%"></i></span>
       <span class="h-icon">${weatherIcon(code, 26)}</span>
       <span class="h-temp">${temp != null ? Math.round(temp) + "°" : "–"}</span>
-      <span class="h-time">${n === 0 ? "jetzt" : t.getHours() + "h"}</span>
+      <span class="h-time">${n === 0 ? "jetzt" : fmtTime(t)}</span>
     </div>`;
   }).join("");
 
@@ -874,7 +884,9 @@ async function radarZoomUsable(host, path, z) {
 /** Fallback: RainViewer-Radarkacheln, letzte Stunde + 30 min Nowcast, animiert. */
 async function initRainviewerRadar() {
   const cfg = await fetchJson("https://api.rainviewer.com/public/weather-maps.json");
-  const frames = [...cfg.radar.past.slice(-7), ...(cfg.radar.nowcast || [])];
+  const past = (cfg.radar.past || []).slice(-CONFIG.radarPastFrames);
+  const nowcast = CONFIG.radarNowcast ? (cfg.radar.nowcast || []) : [];
+  const frames = [...past, ...nowcast];
 
   // Höchste Zoomstufe suchen, die echte Kacheln liefert
   let nativeZoom = null, probed = false;
@@ -907,7 +919,7 @@ async function initRainviewerRadar() {
       { opacity: 0, maxNativeZoom: nativeZoom }).addTo(map));
   radar.idx = 0;
 
-  const lastPastIdx = cfg.radar.past.slice(-7).length - 1;
+  const lastPastIdx = past.length - 1;
   radar.timer = setInterval(() => {
     radar.layers.forEach((l, i) => l.setOpacity(i === radar.idx ? 0.7 : 0));
     const f = radar.frames[radar.idx];
@@ -927,7 +939,8 @@ async function initRainviewerRadar() {
     radar.idx = (radar.idx + 1) % radar.frames.length;
   }, CONFIG.radarFrameMs);
   $("#radar-src").textContent = "Radar: RainViewer (Fallback)";
-  diag.set("Radar", true, `RainViewer · ${frames.length} Bilder · Zoom ${nativeZoom}`);
+  diag.set("Radar", true,
+    `RainViewer · ${past.length} Verlauf + ${nowcast.length} Prognose · Zoom ${nativeZoom}`);
 }
 
 async function refreshRadar() {
