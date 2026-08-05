@@ -144,7 +144,7 @@
   #weather-head h2 { font-size: 1.1rem; font-weight: 600; }
   #weather-head .src { margin-left: auto; font-size: 0.75rem; color: var(--muted); }
   #weather-body { flex: 1; display: flex; align-items: center; gap: 1.6rem; margin-top: 0.3rem; }
-  #w-icon { font-size: 3.6rem; line-height: 1; }
+  #w-icon { line-height: 0; flex: none; }
   #w-temp { font-size: 3.2rem; font-weight: 700; }
   #w-temp small { font-size: 1.1rem; color: var(--muted); font-weight: 400; display: block; }
   #w-rain { flex: 1; }
@@ -162,7 +162,7 @@
   .wh.now { background: rgba(77,163,255,0.10); border-radius: 0.4rem; padding: 0.2rem 0; }
   .wh .h-time { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
   .wh.now .h-time { color: var(--accent); font-weight: 700; }
-  .wh .h-icon { font-size: 1.25rem; line-height: 1.1; }
+  .wh .h-icon { line-height: 0; }
   .wh .h-temp { font-size: 0.95rem; font-weight: 700; font-variant-numeric: tabular-nums; }
   .wh .h-bar {
     width: 100%; max-width: 1.5rem; height: 2.6rem; background: #1e2732;
@@ -181,6 +181,22 @@
   .wh .h-pct.t-snow  { color: var(--p-snow);  font-weight: 700; }
   .wh .h-pct.t-ice   { color: var(--p-ice);   font-weight: 700; }
   .wh .h-pct.t-storm { color: var(--p-storm); font-weight: 700; }
+
+  /* Wettersymbole: Wolke neutral, Niederschlag in der Farbe seiner Art —
+     dieselbe Zuordnung wie bei den Balken darüber. */
+  .wi { display: block; }
+  .wi .i-cloud { fill: #9fb0c2; }
+  .wi .i-sun { fill: #ffc247; }
+  .wi .i-ray, .wi .i-rain, .wi .i-snow, .wi .i-ice, .wi .i-fog {
+    fill: none; stroke-width: 1.7; stroke-linecap: round;
+  }
+  .wi .i-ray  { stroke: #ffc247; }
+  .wi .i-rain { stroke: var(--p-rain); }
+  .wi .i-snow { stroke: var(--p-snow); }
+  .wi .i-ice  { stroke: var(--p-ice); }
+  .wi .i-fog  { stroke: #9fb0c2; }
+  .wi .i-hail { fill: var(--p-storm); }
+  .wi .i-bolt { fill: #ffd23f; }
 
   #w-legend { display: flex; gap: 0.9rem; margin-top: 0.45rem; font-size: 0.72rem; color: var(--muted); }
   #w-legend span { display: flex; align-items: center; gap: 0.3rem; }
@@ -230,7 +246,7 @@
         <span class="src">Source: MeteoSwiss</span>
       </div>
       <div id="weather-body">
-        <div id="w-icon">⏳</div>
+        <div id="w-icon"></div>
         <div id="w-temp">–°<small>gefühlt –°</small></div>
         <div id="w-rain">
           <div class="headline">Wetterdaten laden…</div>
@@ -503,18 +519,78 @@ async function refreshOev() {
 /* =========================================================================
  * Wetterzahlen: Open-Meteo (MeteoSwiss-Modell ICON-CH, mit Fallback)
  * ========================================================================= */
-const WMO_ICONS = {
-  0: ["☀️", "klar"], 1: ["🌤", "meist klar"], 2: ["⛅", "teils bewölkt"], 3: ["☁️", "bedeckt"],
-  45: ["🌫", "Nebel"], 48: ["🌫", "Reifnebel"],
-  51: ["🌦", "leichter Niesel"], 53: ["🌦", "Niesel"], 55: ["🌧", "starker Niesel"],
-  56: ["🧊", "gefrierender Niesel"], 57: ["🧊", "gefrierender Niesel"],
-  61: ["🌧", "leichter Regen"], 63: ["🌧", "Regen"], 65: ["🌧", "starker Regen"],
-  66: ["🧊", "gefrierender Regen"], 67: ["🧊", "gefrierender Regen"],
-  71: ["🌨", "leichter Schneefall"], 73: ["🌨", "Schneefall"], 75: ["🌨", "starker Schneefall"],
-  77: ["🌨", "Schneegriesel"], 80: ["🌦", "Regenschauer"], 81: ["🌧", "Regenschauer"],
-  82: ["⛈", "heftige Schauer"], 85: ["🌨", "Schneeschauer"], 86: ["🌨", "Schneeschauer"],
-  95: ["⛈", "Gewitter"], 96: ["⛈", "Gewitter mit Hagel"], 99: ["⛈", "Gewitter mit Hagel"],
+/* --- Eigene SVG-Wettersymbole ------------------------------------------
+ * Selbst gezeichnet, also keine Lizenz- oder Quellenangabe nötig, und
+ * plattformunabhängig: Emoji sehen auf Windows/Linux/Android verschieden
+ * aus, diese Symbole überall gleich. Aufbau immer gleich, damit man die
+ * Niederschlagsart am Zeichen unter der Wolke erkennt:
+ *   Striche = Regen, Sterne = Schnee, Kugeln = Hagel, Blitz = Gewitter.
+ * -------------------------------------------------------------------- */
+const SVG = {
+  cloud: `<g class="i-cloud">
+    <circle cx="8.8" cy="12.6" r="3.7"/><circle cx="14.2" cy="11.4" r="4.6"/>
+    <circle cx="17.6" cy="14.4" r="2.9"/><rect x="7.6" y="13.4" width="10.6" height="3.9" rx="1.95"/>
+  </g>`,
+  sunFull: `<circle class="i-sun" cx="12" cy="11.5" r="4.6"/>
+    <g class="i-ray"><path d="M12 2.6v2.3M12 18.1v2.3M2.6 11.5h2.3M19.1 11.5h2.3
+      M5.4 4.9l1.6 1.6M17 16.5l1.6 1.6M18.6 4.9L17 6.5M7 16.5l-1.6 1.6"/></g>`,
+  sunSmall: `<circle class="i-sun" cx="8.6" cy="8.2" r="3.2"/>
+    <g class="i-ray"><path d="M8.6 1.9v1.7M2.3 8.2H4M4.2 3.8l1.2 1.2M13 3.8l-1.2 1.2"/></g>`,
+  // Anzahl der Striche/Sterne trägt die Intensität: mehr = stärker
+  rain: (xs) => `<g class="i-rain">` +
+    xs.map((x) => `<path d="M${x} 18.9l-1.5 3.5"/>`).join("") + `</g>`,
+  flakes: (xs) => `<g class="i-snow">` + xs.map((x) =>
+    `<path d="M${x} 18.7v3.6M${x - 1.6} 19.6l3.2 1.8M${x + 1.6} 19.6l-3.2 1.8"/>`).join("") + `</g>`,
+  ice: `<g class="i-ice"><path d="M9.6 18.9l-1.5 3.5"/>
+    <path d="M15.4 18.7v3.6M13.8 19.6l3.2 1.8M17 19.6l-3.2 1.8"/></g>`,
+  hail: `<g class="i-hail"><circle cx="10" cy="20.8" r="1.6"/><circle cx="15.6" cy="20.8" r="1.6"/></g>`,
+  bolt: `<g class="i-bolt" transform="translate(7.6 16.2) scale(0.32)">
+    <path d="M13 2L4.09 12.97h6.5L11 22l8.91-10.97h-6.5z"/></g>`,
+  fog: `<g class="i-fog"><path d="M4.8 19.4h14.4M7 22h10"/></g>`,
 };
+
+/** Symbol-Bausteine je Wetterlage. */
+const WEATHER_ICONS = {
+  clear:    () => SVG.sunFull,
+  partly:   () => SVG.sunSmall + SVG.cloud,
+  cloudy:   () => SVG.cloud,
+  fog:      () => SVG.cloud + SVG.fog,
+  drizzle:  () => SVG.cloud + SVG.rain([10.5, 15]),
+  rain:     () => SVG.cloud + SVG.rain([9, 13, 17]),
+  rainHeavy:() => SVG.cloud + SVG.rain([7.6, 11, 14.4, 17.8]),
+  ice:      () => SVG.cloud + SVG.ice,
+  snow:     () => SVG.cloud + SVG.flakes([9.4, 15.4]),
+  snowHeavy:() => SVG.cloud + SVG.flakes([7.6, 12.4, 17.2]),
+  hail:     () => SVG.cloud + SVG.hail,
+  storm:    () => SVG.cloud + SVG.bolt,
+  stormHail:() => SVG.cloud + SVG.bolt + SVG.hail,
+};
+
+/** WMO-Wettercode -> Symbolname + deutscher Klartext. */
+const WMO = {
+  0:  ["clear", "klar"],            1:  ["partly", "meist klar"],
+  2:  ["partly", "teils bewölkt"],  3:  ["cloudy", "bedeckt"],
+  45: ["fog", "Nebel"],             48: ["fog", "Reifnebel"],
+  51: ["drizzle", "leichter Niesel"], 53: ["drizzle", "Niesel"], 55: ["rain", "starker Niesel"],
+  56: ["ice", "gefrierender Niesel"], 57: ["ice", "gefrierender Niesel"],
+  61: ["drizzle", "leichter Regen"], 63: ["rain", "Regen"],  65: ["rainHeavy", "starker Regen"],
+  66: ["ice", "gefrierender Regen"], 67: ["ice", "gefrierender Regen"],
+  71: ["snow", "leichter Schneefall"], 73: ["snow", "Schneefall"], 75: ["snowHeavy", "starker Schneefall"],
+  77: ["snow", "Schneegriesel"],
+  80: ["drizzle", "Regenschauer"],  81: ["rain", "Regenschauer"], 82: ["rainHeavy", "heftige Schauer"],
+  85: ["snow", "Schneeschauer"],    86: ["snowHeavy", "starker Schneeschauer"],
+  95: ["storm", "Gewitter"],
+  96: ["stormHail", "Gewitter mit Hagel"], 99: ["stormHail", "Gewitter mit Hagel"],
+};
+
+/** Fertiges SVG für einen Wettercode in der gewünschten Kantenlänge. */
+function weatherIcon(code, size) {
+  const [name] = WMO[code] || ["cloudy"];
+  const parts = (WEATHER_ICONS[name] || WEATHER_ICONS.cloudy)();
+  return `<svg class="wi" viewBox="0 0 24 24" width="${size}" height="${size}"
+    aria-hidden="true">${parts}</svg>`;
+}
+const wmoText = (code) => (WMO[code] || ["", ""])[1];
 
 async function refreshWeather() {
   const base = "https://api.open-meteo.com/v1/forecast"
@@ -544,8 +620,8 @@ async function refreshWeather() {
   diag.set("Wetter", true, modelLabel);
 
   const cur = data.current;
-  const [icon, text] = WMO_ICONS[cur.weather_code] || ["·", ""];
-  $("#w-icon").textContent = icon;
+  const text = wmoText(cur.weather_code);
+  $("#w-icon").innerHTML = weatherIcon(cur.weather_code, 68);
   $("#w-temp").innerHTML =
     `${Math.round(cur.temperature_2m)}°<small>gefühlt ${Math.round(cur.apparent_temperature)}°</small>`;
 
@@ -623,14 +699,13 @@ function renderHourly(hh, from) {
     const p = hh.precipitation_probability?.[i] ?? 0;
     const temp = hh.temperature_2m?.[i];
     const code = hh.weather_code?.[i];
-    const [ic] = WMO_ICONS[code] || ["·"];
     const kind = precipKind(code);
     if (kind.label && p >= CONFIG.rainRiskPct) seen.set(kind.key, kind.label);
     // Mindesthöhe 2 %, damit auch 0 % als flacher Balken sichtbar bleibt
     return `<div class="wh${n === 0 ? " now" : ""}">
       <span class="h-pct t-${kind.key}">${p}%</span>
       <span class="h-bar"><i class="k-${kind.key}" style="height:${Math.max(p, 2)}%"></i></span>
-      <span class="h-icon">${ic}</span>
+      <span class="h-icon">${weatherIcon(code, 26)}</span>
       <span class="h-temp">${temp != null ? Math.round(temp) + "°" : "–"}</span>
       <span class="h-time">${n === 0 ? "jetzt" : t.getHours() + "h"}</span>
     </div>`;
