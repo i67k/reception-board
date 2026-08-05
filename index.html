@@ -164,6 +164,10 @@
     position: absolute; inset: 0; border-radius: 0.9rem;
     background: var(--surface); border: 1px solid var(--line);
   }
+  /* Nur die Basiskarte entsättigen, nicht die Radarflächen darüber —
+     deshalb hängt der Filter am Kachel-Container dieser einen Ebene. */
+  .basemap-tint { filter: saturate(0.62) brightness(1.06) contrast(0.94); }
+
   #radar-label {
     position: absolute; z-index: 1000; top: 0.7rem; right: 0.7rem;
     background: rgba(255,255,255,0.94); border: 1px solid var(--line);
@@ -349,6 +353,17 @@ const CONFIG = {
   // Radarkacheln werden nur bis maxNativeZoom angefragt und darüber
   // hochskaliert — RainViewer liefert sonst "Zoom Level Not Supported".
   mapZoom: 9,
+  // Basiskarte von swisstopo. "farbe" = Landeskarte in Farbe (Wald grün,
+  // Seen blau), "grau" = neutrale Graustufen, "luftbild" = Satellitenbild.
+  // basemapTint entsättigt die Kacheln leicht, damit die Radarflächen
+  // darüber nicht mit den Kartenfarben konkurrieren.
+  basemap: "farbe",
+  basemapTint: true,
+  basemaps: {
+    farbe:    "ch.swisstopo.pixelkarte-farbe",
+    grau:     "ch.swisstopo.pixelkarte-grau",
+    luftbild: "ch.swisstopo.swissimage",
+  },
   // RainViewer liefert Radarkacheln nur bis Zoomstufe 7 (dokumentiertes
   // Limit des freien Dienstes); darüber kommt ein Platzhalterbild
   // ("Zoom Level Not Supported"). Die Karte zeigt trotzdem Zoom 9 — Leaflet
@@ -357,16 +372,20 @@ const CONFIG = {
   // falls sich das Limit ändert; greift keine Stufe, bleibt das Radar aus.
   radarZoomCandidates: [7, 6, 5],
 
-  // Zeitumfang der Radar-Animation. RainViewer liefert Vergangenheitsbilder
-  // im 10-Minuten-Takt (rund 2 Stunden zurück) und bis zu 3 Prognosebilder
-  // (rund 30 Minuten voraus) — mehr Zukunft gibt der freie Dienst nicht her.
-  radarPastFrames: 12,                   // Vergangenheit: 12 x 10 min = 2 h
+  // Zeitumfang der Radar-Animation. Für den Rezeptions-Blick zählt, was
+  // kommt — nicht was war: nur ein kurzer Anlauf aus der Vergangenheit,
+  // dann die Prognose. RainViewer liefert Vergangenheit im 10-Minuten-Takt
+  // und bis zu 3 Prognosebilder (rund 30 min voraus, mehr gibt der freie
+  // Dienst nicht her).
+  radarPastFrames: 2,                    // 10 min davor + aktuelles Bild
   radarNowcast: true,                    // Prognosebilder mitspielen
 
   refreshOevMs:     60_000,              // Abfahrten
   refreshWeatherMs: 10 * 60_000,         // Wetterzahlen
   refreshRadarMs:   5 * 60_000,          // Radar-Framelisten
-  radarFrameMs:     650,                 // Animationstempo
+  radarFrameMs:     700,                 // Animationstempo je Bild
+  radarHoldMs:      2600,                // Standzeit auf dem letzten Prognosebild
+  radarOpacity:     0.75,                // Deckkraft der Radarflächen
   staleAfterMs:     5 * 60_000,          // ab wann Daten als veraltet gelten
 
   delayWarnMin:  2,                      // gelb ab X Minuten Verspätung
@@ -797,9 +816,10 @@ const map = L.map("map", {
   keyboard: false, touchZoom: false,
 }).setView([CONFIG.home.lat, CONFIG.home.lon], CONFIG.mapZoom);
 
+const baseLayer = CONFIG.basemaps[CONFIG.basemap] || CONFIG.basemaps.grau;
 L.tileLayer(
-  "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg",
-  { maxZoom: 18, opacity: 0.9 }).addTo(map);
+  `https://wmts.geo.admin.ch/1.0.0/${baseLayer}/default/current/3857/{z}/{x}/{y}.jpeg`,
+  { maxZoom: 18, className: CONFIG.basemapTint ? "basemap-tint" : "" }).addTo(map);
 
 // Standort Rezeption
 L.circleMarker([CONFIG.home.lat, CONFIG.home.lon], {
@@ -825,7 +845,7 @@ const radar = { mode: null, frames: [], layers: [], idx: 0, timer: null };
 function clearRadarLayers() {
   for (const l of radar.layers) map.removeLayer(l);
   radar.layers = [];
-  if (radar.timer) { clearInterval(radar.timer); radar.timer = null; }
+  if (radar.timer) { clearTimeout(radar.timer); radar.timer = null; }
 }
 
 /** Bevorzugt: MeteoSwiss-Radar via geo.admin.ch WMS (statisch, aktuellstes Bild). */
@@ -920,8 +940,8 @@ async function initRainviewerRadar() {
   radar.idx = 0;
 
   const lastPastIdx = past.length - 1;
-  radar.timer = setInterval(() => {
-    radar.layers.forEach((l, i) => l.setOpacity(i === radar.idx ? 0.7 : 0));
+  const step = () => {
+    radar.layers.forEach((l, i) => l.setOpacity(i === radar.idx ? CONFIG.radarOpacity : 0));
     const f = radar.frames[radar.idx];
     const t = new Date(f.time * 1000);
     const isNowcast = radar.idx > lastPastIdx;
@@ -935,9 +955,13 @@ async function initRainviewerRadar() {
       `<span class="rl-time">${fmtTime(t)}</span> `
       + `<span class="${isNowcast ? "nowcast" : "rl-rel"}">${rel}${isNowcast ? " · Prognose" : ""}</span>`
       + `<span class="rl-bar"><i style="width:${pct}%"></i></span>`;
-    // Letztes Bild etwas länger stehen lassen, damit "jetzt" ablesbar ist
+    // Auf dem letzten (am weitesten vorausschauenden) Bild länger stehen
+    // bleiben — das ist die Aussage, die man im Vorbeigehen mitnimmt.
+    const isLast = radar.idx === radar.frames.length - 1;
     radar.idx = (radar.idx + 1) % radar.frames.length;
-  }, CONFIG.radarFrameMs);
+    radar.timer = setTimeout(step, isLast ? CONFIG.radarHoldMs : CONFIG.radarFrameMs);
+  };
+  step();
   $("#radar-src").textContent = "Radar: RainViewer (Fallback)";
   diag.set("Radar", true,
     `RainViewer · ${past.length} Verlauf + ${nowcast.length} Prognose · Zoom ${nativeZoom}`);

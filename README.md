@@ -130,15 +130,38 @@ irrelevant); transport.opendata.ch, Open-Meteo und RainViewer senden
 Die Animation spielt Vergangenheit und Prognose in einem Durchlauf:
 
 - **Vergangenheit:** RainViewer liefert Bilder im 10-Minuten-Takt, rund
-  2 Stunden zurück. `CONFIG.radarPastFrames` (Standard 12 = 2 h) steuert,
-  wie viele davon gezeigt werden.
+  2 Stunden zurück. `CONFIG.radarPastFrames` steuert, wie viele davon
+  gezeigt werden — Standard **2**, also nur ein kurzer Anlauf (10 Minuten
+  davor plus aktuelles Bild). Für den Blick im Vorbeigehen zählt, was
+  kommt; auf 12 gestellt zeigt es stattdessen die vollen 2 Stunden.
 - **Zukunft:** bis zu 3 Prognosebilder, also rund **30 Minuten voraus** —
   mehr gibt der freie Dienst nicht her. Abschaltbar über
   `CONFIG.radarNowcast: false`, dann läuft nur der Verlauf.
 
+Auf dem letzten, am weitesten vorausschauenden Bild bleibt die Animation
+kurz stehen (`CONFIG.radarHoldMs`) — das ist die Aussage, die man im
+Vorbeigehen mitnimmt.
+
 Prognosebilder sind im Label als „Prognose" markiert und blau eingefärbt.
 Im Diagnose-Overlay steht die tatsächliche Aufteilung, z.B.
 `RainViewer · 12 Verlauf + 3 Prognose · Zoom 7`.
+
+## Basiskarte
+
+`CONFIG.basemap` wählt die swisstopo-Karte:
+
+| Wert | Karte |
+|---|---|
+| `farbe` (Standard) | Landeskarte in Farbe — Wald grün, Seen blau, Siedlung grau |
+| `grau` | neutrale Graustufen, Radar hebt sich am stärksten ab |
+| `luftbild` | Satellitenbild (SWISSIMAGE) |
+
+`CONFIG.basemapTint: true` entsättigt die Kacheln leicht
+(`saturate(0.62) brightness(1.06)`), damit die farbigen Radarflächen nicht
+mit den Kartenfarben konkurrieren. Der Filter hängt gezielt am Kachel-
+Container der Basiskarte, nicht am gemeinsamen Layer-Pane — die
+Radarflächen bleiben also unverfälscht. Auf `false` gesetzt zeigt die Karte
+die Originalfarben von swisstopo.
 
 ## Standort und Datenschutz
 
