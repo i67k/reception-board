@@ -184,6 +184,25 @@
   }
   #radar-label .rl-bar i { display: block; height: 100%; background: var(--accent); }
 
+  /* Regen-Zeitleiste: 15-Minuten-Schritte für die nächsten 2 Stunden.
+     Ergänzt das Radar, dessen Prognose bei 30 Minuten endet. */
+  #rain-timeline { display: flex; flex-direction: column; gap: 0.32rem; }
+  .rt-head { display: flex; align-items: baseline; gap: 0.5rem; }
+  .rt-head b {
+    font-size: 0.7rem; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.09em;
+  }
+  .rt-head span { margin-left: auto; font-size: 0.72rem; color: var(--muted); }
+  .rt-head span.rain { color: var(--accent); font-weight: 700; }
+  .rt-bars { display: flex; gap: 2px; height: 0.6rem; }
+  .rt-bars i { flex: 1; border-radius: 2px; background: var(--surface); }
+  .rt-bars i.r1 { background: #a9d5fb; }
+  .rt-bars i.r2 { background: #4aa8f5; }
+  .rt-bars i.r3 { background: #0d6fc4; }
+  .rt-ticks { display: flex; font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .rt-ticks span { flex: 1; }
+  .rt-ticks span:last-child { text-align: right; flex: 0 0 auto; }
+
   /* ---------- Wetter ---------- */
   #weather-card { display: flex; flex-direction: column; padding-top: 0.9rem; border-top: 1px solid var(--line); }
   #weather-head { display: flex; align-items: baseline; gap: 0.7rem; }
@@ -296,6 +315,7 @@
       <div id="map"></div>
       <div id="radar-label">Radar lädt…</div>
     </div>
+    <div id="rain-timeline"></div>
     <div id="weather-card">
       <div id="weather-head">
         <h2>Wetter</h2>
@@ -562,20 +582,22 @@ function renderStops() {
       const countMin = Math.max(0, Math.round((d.effective - now) / 60_000));
       const count = countMin === 0 ? "jetzt" : `${countMin}′`;
       const delay = d.delayMin >= CONFIG.delayWarnMin ? `+${d.delayMin}′` : "";
-      // "ab" ist die tatsächlich erwartete Abfahrt (Fahrplan + Verspätung),
-      // damit Countdown und Uhrzeit denselben Zeitpunkt meinen.
+      // "Plan" ist die Fahrplanzeit, die Verspätung steht separat daneben —
+      // Plan + Versp. ergibt die tatsächliche Abfahrt, und genau darauf
+      // zählt auch "in" herunter. Die drei Spalten passen also zusammen,
+      // sobald man die Verspätung dazurechnet.
       return `<tr class="${cls}">
         <td class="line"><span class="badge">${d.line}</span></td>
         <td class="dest">${d.to}</td>
         <td class="count">${count}</td>
-        <td class="time">${fmtTime(new Date(d.effective))}</td>
+        <td class="time">${fmtTime(new Date(d.scheduled))}</td>
         <td class="delay">${delay}</td>
       </tr>`;
     }).join("");
 
     const head = `<thead><tr>
       <th class="h-line"></th><th></th>
-      <th class="h-count">in</th><th class="h-time">ab</th><th class="h-delay">Versp.</th>
+      <th class="h-count">in</th><th class="h-time">Plan</th><th class="h-delay">Versp.</th>
     </tr></thead>`;
 
     const body = st.error && !st.journeys
@@ -763,6 +785,41 @@ async function refreshWeather() {
     + ` · Modell ${modelLabel}`;
 
   renderHourly(hh, h0);
+  renderRainTimeline(times, precip, start);
+}
+
+/**
+ * Zeitleiste für die nächsten 2 Stunden im 15-Minuten-Raster.
+ * Das Radar zeigt, WO es regnet, reicht als Prognose aber nur 30 Minuten.
+ * Diese Leiste zeigt für den Standort der Rezeption, WANN es regnet —
+ * mit der vollen Vorhersagetiefe des MeteoSwiss-Modells.
+ */
+function renderRainTimeline(times, precip, start) {
+  const el = $("#rain-timeline");
+  if (!times.length) { el.innerHTML = ""; return; }
+
+  const n = 8;                                  // 8 x 15 min = 2 Stunden
+  const cells = [];
+  for (let i = start; i < Math.min(start + n, times.length); i++) {
+    const mm = precip[i] || 0;
+    // Stufen nach Niederschlagsmenge je 15 min
+    const cls = mm >= 1 ? "r3" : mm >= 0.3 ? "r2" : mm >= 0.05 ? "r1" : "";
+    cells.push({ t: new Date(times[i]), mm, cls });
+  }
+  if (!cells.length) { el.innerHTML = ""; return; }
+
+  const wet = cells.filter((c) => c.cls);
+  const note = wet.length
+    ? `Regen ab ${fmtTime(wet[0].t)}`
+    : "durchgehend trocken";
+
+  el.innerHTML = `
+    <div class="rt-head"><b>Regen an der Rezeption · nächste 2 h</b>
+      <span class="${wet.length ? "rain" : ""}">${note}</span></div>
+    <div class="rt-bars">${cells.map((c) => `<i class="${c.cls}"></i>`).join("")}</div>
+    <div class="rt-ticks">${cells.filter((_, i) => i % 2 === 0)
+      .map((c) => `<span>${fmtTime(c.t)}</span>`).join("")}
+      <span>${fmtTime(new Date(cells[cells.length - 1].t.getTime() + 15 * 60_000))}</span></div>`;
 }
 
 /** Niederschlagsart aus dem WMO-Wettercode — bestimmt die Balkenfarbe. */
