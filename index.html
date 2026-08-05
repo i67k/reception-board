@@ -293,11 +293,13 @@ const CONFIG = {
   // Radarkacheln werden nur bis maxNativeZoom angefragt und darüber
   // hochskaliert — RainViewer liefert sonst "Zoom Level Not Supported".
   mapZoom: 9,
-  // RainViewer liefert nur bis zu einer bestimmten Zoomstufe echte Kacheln,
-  // darüber ein Platzhalterbild ("Zoom Level Not Supported"). Welche Stufe
-  // das ist, wird beim Start gemessen — diese Kandidaten von scharf nach
-  // grob durchprobiert. Greift keine, bleibt das Radar aus.
-  radarZoomCandidates: [9, 8, 7, 6, 5],
+  // RainViewer liefert Radarkacheln nur bis Zoomstufe 7 (dokumentiertes
+  // Limit des freien Dienstes); darüber kommt ein Platzhalterbild
+  // ("Zoom Level Not Supported"). Die Karte zeigt trotzdem Zoom 9 — Leaflet
+  // skaliert die Stufe-7-Kacheln hoch, was bei der Auflösung der Radardaten
+  // (~1 km) kaum auffällt. Die Liste wird von scharf nach grob geprüft,
+  // falls sich das Limit ändert; greift keine Stufe, bleibt das Radar aus.
+  radarZoomCandidates: [7, 6, 5],
 
   refreshOevMs:     60_000,              // Abfahrten
   refreshWeatherMs: 10 * 60_000,         // Wetterzahlen
@@ -837,8 +839,8 @@ async function initRainviewerRadar() {
       diag.set("Radar", false, "keine nutzbare Zoomstufe");
       return;
     }
-    // Nicht messbar (z.B. kein CORS): konservativste Stufe versuchen
-    nativeZoom = CONFIG.radarZoomCandidates[CONFIG.radarZoomCandidates.length - 1];
+    // Nicht messbar (z.B. kein CORS): dokumentiertes Limit verwenden
+    nativeZoom = CONFIG.radarZoomCandidates[0];
   }
 
   clearRadarLayers();

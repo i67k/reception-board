@@ -106,13 +106,17 @@ OGD-Rohdaten (GeoTIFF). Lösung im Frontend:
    ohne Key, CORS-offen) mit animierter letzter Stunde + 30 min Nowcast. Die
    Radar-Quelle wird in der Fusszeile transparent ausgewiesen.
 
-**RainViewer und Zoomstufen:** RainViewer liefert Radarkacheln nur bis zu
-einer bestimmten Zoomstufe; darüber kommt ein Platzhalterbild
-("Zoom Level Not Supported"), das sich sonst über die Karte legt. Welche
-Stufe noch echte Kacheln liefert, misst die Seite beim Start selbst: Das
-Platzhalterbild ist für jede Kachel byte-identisch und deutlich grösser als
-eine leere, regenfreie Kachel — zwei verschiedene Kacheln mit exakt gleicher
-Grösse sind also der Platzhalter. Getestet wird von scharf nach grob
+**RainViewer und Zoomstufen:** Der freie RainViewer-Dienst liefert
+Radarkacheln nur **bis Zoomstufe 7**; ab Stufe 8 kommt statt Daten ein
+Platzhalterbild ("Zoom Level Not Supported"), das sich über die Karte legt.
+Die Karte läuft trotzdem auf Zoom 9 — Leaflet skaliert die Stufe-7-Kacheln
+hoch, was bei der Auflösung der Radardaten (~1 km) kaum auffällt.
+
+Zusätzlich prüft die Seite beim Start, ob die eingestellte Stufe wirklich
+Daten liefert, falls sich das Limit einmal ändert: Das Platzhalterbild ist
+für jede Kachel byte-identisch und deutlich grösser als eine leere,
+regenfreie Kachel — zwei verschiedene Kacheln mit exakt gleicher Grösse sind
+also der Platzhalter. Geprüft wird von scharf nach grob
 (`CONFIG.radarZoomCandidates`); greift keine Stufe, bleibt das Radar
 abgeschaltet statt Platzhalter anzuzeigen. Die gewählte Stufe steht im
 Diagnose-Overlay (Taste `d`), z.B. `RainViewer · 10 Bilder · Zoom 7`.
