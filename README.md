@@ -54,7 +54,33 @@ dem tatsächlich verwendeten Wettermodell. Das ist der schnellste Weg, bei der
 Inbetriebnahme am Kiosk zu sehen, welcher Link antwortet — ohne
 Entwicklerkonsole.
 
-Zum Nachprüfen von Hand (einfach im Browser öffnen, alle liefern JSON):
+### Prüfskript `tools/api-check.js`
+
+Wenn du sehen willst, was die APIs **tatsächlich** liefern:
+
+1. `index.html` im Browser öffnen
+2. `F12` drücken → Reiter **Console**
+3. Den gesamten Inhalt von `tools/api-check.js` hineinkopieren, Enter
+
+Das Skript liest nur und verändert nichts. Es gibt aus:
+
+- **RainViewer:** alle Vergangenheits- und Prognosebilder als Tabelle mit
+  Uhrzeit und Relativzeit, dazu die Antwort auf die entscheidende Frage —
+  reicht die Prognose überhaupt in die Zukunft, oder sind ihre Zeitstempel
+  schon abgelaufen? Ausserdem die Kachelgrössen für Zoom 5 bis 9 mit
+  Deutung (Radardaten vorhanden / leer / Platzhalter).
+- **ÖV:** welche Station jeder Suchbegriff wirklich trifft, samt ID und den
+  nächsten Abfahrten mit Verspätung.
+- **Wetter:** welche der drei Modellstufen antwortet.
+- **Karte:** ob die swisstopo-Kacheln laden.
+
+Warum in der Konsole der Seite und nicht mit `curl`: Der Browser wendet dort
+dieselben CORS-Regeln an wie im echten Betrieb. Was dort funktioniert,
+funktioniert auch auf der Tafel — und umgekehrt.
+
+### Einzelne Endpunkte von Hand
+
+Zum Nachprüfen im Browser (alle liefern JSON):
 
 ```
 # Haltestelle suchen -> liefert die ID im Feld stations[].id
