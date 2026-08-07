@@ -49,11 +49,11 @@
       console.log("➜ PROBLEM: RainViewer liefert gerade gar keine Prognosebilder.");
     }
 
-    /* Kachelgrössen je Zoomstufe. Deutung:
-     *   ~100-400 Byte  = leere Kachel, dort fällt kein Niederschlag
-     *   mehrere KB     = Kachel mit Regenflächen
-     *   bei allen Kacheln exakt gleich und > 1500 Byte = Platzhalterbild
-     *                    "Zoom Level Not Supported"                        */
+    /* Kachelgrössen je Zoomstufe. Am echten Dienst gemessen:
+     *   ~334 Byte          = leere Kachel, dort fällt kein Niederschlag
+     *   1000-5500 Byte     = Kachel mit Radardaten
+     *   exakt 1370 Byte und für beide Kacheln gleich
+     *                      = Platzhalter "Zoom Level Not Supported"       */
     const tileXY = (z) => {
       const n = 2 ** z, r = (HOME.lat * Math.PI) / 180;
       return {
@@ -72,7 +72,7 @@
           const [a, b] = await Promise.all([fetch(url, { cache: "no-store" }),
                                            fetch(url2, { cache: "no-store" })]);
           const [sa, sb] = [(await a.blob()).size, (await b.blob()).size];
-          const platzhalter = sa === sb && sa > 1500;
+          const platzhalter = sa === sb && sa > 900;
           console.log(`  Zoom ${z}: ${sa} / ${sb} Byte`
             + (platzhalter ? "  ➜ PLATZHALTER (Zoomstufe nicht unterstützt)"
                : sa < 800 && sb < 800 ? "  ➜ leer (kein Niederschlag)" : "  ➜ Radardaten vorhanden"));

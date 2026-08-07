@@ -413,6 +413,7 @@ const CONFIG = {
   // und bis zu 3 Prognosebilder (rund 30 min voraus, mehr gibt der freie
   // Dienst nicht her).
   radarPastFrames: 2,                    // 10 min davor + aktuelles Bild
+  radarPastFramesNoForecast: 12,         // ohne Prognose: voller Verlauf (2 h)
   radarNowcast: true,                    // Prognosebilder mitspielen
 
   refreshOevMs:     60_000,              // Abfahrten
@@ -421,7 +422,11 @@ const CONFIG = {
   radarFrameMs:     700,                 // Animationstempo je Bild
   radarHoldMs:      2600,                // Standzeit auf dem letzten Prognosebild
   radarOpacity:     0.75,                // Deckkraft der Radarflächen
-  emptyTileMaxBytes: 800,                // darunter gilt eine Radarkachel als leer
+  // Am echten Dienst gemessen: eine leere (regenfreie) Kachel ist ~334 Byte,
+  // das Platzhalterbild "Zoom Level Not Supported" exakt 1370 Byte, echte
+  // Radarkacheln liegen bei 1000-5500 Byte. Die Schwellen liegen dazwischen.
+  emptyTileMaxBytes:       800,          // darunter gilt eine Kachel als leer
+  placeholderMinBytes:     900,          // zwei gleich grosse Kacheln darüber = Platzhalter
   staleAfterMs:     5 * 60_000,          // ab wann Daten als veraltet gelten
 
   delayWarnMin:  2,                      // gelb ab X Minuten Verspätung
@@ -972,7 +977,7 @@ async function radarZoomUsable(host, path, z) {
     tileByteSize(url(a.x, a.y)), tileByteSize(url(a.x + 1, a.y + 1)),
   ]);
   if (s1 == null || s2 == null) return null;
-  return !(s1 === s2 && s1 > 1500);
+  return !(s1 === s2 && s1 > CONFIG.placeholderMinBytes);
 }
 
 /**
@@ -993,8 +998,13 @@ async function radarHasPrecip(host, path, z) {
 /** Fallback: RainViewer-Radarkacheln, letzte Stunde + 30 min Nowcast, animiert. */
 async function initRainviewerRadar() {
   const cfg = await fetchJson("https://api.rainviewer.com/public/weather-maps.json");
-  const past = (cfg.radar.past || []).slice(-CONFIG.radarPastFrames);
   const nowcast = CONFIG.radarNowcast ? (cfg.radar.nowcast || []) : [];
+  // Der kurze Anlauf ergibt nur Sinn, wenn danach eine Prognose folgt.
+  // Liefert RainViewer keine (kommt vor, etwa an niederschlagsfreien Tagen),
+  // wäre die Animation sonst ein Standbild — dann lieber den vollen Verlauf
+  // zeigen, damit wenigstens die Zugrichtung erkennbar ist.
+  const wantPast = nowcast.length ? CONFIG.radarPastFrames : CONFIG.radarPastFramesNoForecast;
+  const past = (cfg.radar.past || []).slice(-wantPast);
   const frames = [...past, ...nowcast];
 
   // Höchste Zoomstufe suchen, die echte Kacheln liefert
