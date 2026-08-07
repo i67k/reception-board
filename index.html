@@ -422,6 +422,21 @@ const CONFIG = {
   refreshOevMs:     60_000,              // Abfahrten
   refreshWeatherMs: 10 * 60_000,         // Wetterzahlen
   refreshRadarMs:   5 * 60_000,          // Radar-Framelisten
+  // Eigene Niederschlagsprognose: Open-Meteo liefert für mehrere Punkte in
+  // EINER Anfrage. Über ein Gitter um die Rezeption entsteht daraus ein
+  // Vorhersagefeld aus dem MeteoSwiss-Modell — ohne Key, ohne Proxy, und
+  // weiter voraus als RainViewers Nowcast.
+  // Aufwand: 9x9 = 81 Punkte, alle 20 min = 72 Abrufe/Tag -> 5832
+  // gewichtete Aufrufe, unterhalb des freien Kontingents von 10'000.
+  forecastGrid: {
+    enabled: true,
+    size: 9,                             // 9 x 9 Gitterpunkte
+    spanKm: 54,                          // Kantenlänge (rund 6 km Raster)
+    steps: 8,                            // 8 x 15 min = 2 Stunden voraus
+    refreshMs: 20 * 60_000,
+    opacity: 0.7,
+  },
+
   radarFrameMs:     700,                 // Animationstempo je Bild
   radarHoldMs:      2600,                // Standzeit auf dem letzten Prognosebild
   radarOpacity:     0.75,                // Deckkraft der Radarflächen
@@ -880,7 +895,6 @@ function renderHourly(hh, from) {
   // Bei vielen Spalten kleinere Symbole und nur jede zweite Uhrzeit,
   // damit sich die Beschriftung nicht überlappt.
   const iconPx = slice.length > 18 ? 18 : slice.length > 13 ? 21 : 26;
-  const labelEvery = slice.length > 18 ? 2 : 1;
 
   const seen = new Map();   // Arten, die im Zeitfenster tatsächlich vorkommen
   el.innerHTML = slice.map((i, n) => {
@@ -894,8 +908,7 @@ function renderHourly(hh, from) {
     if (kind.label && p >= CONFIG.rainRiskPct) seen.set(kind.key, kind.label);
     // Mindesthöhe 2 %, damit auch 0 % als flacher Balken sichtbar bleibt
     const isNow = i === from;
-    const label = isNow ? "jetzt"
-      : (n % labelEvery === 0 ? String(t.getHours()).padStart(2, "0") : "");
+    const label = isNow ? "jetzt" : String(t.getHours()).padStart(2, "0");
     return `<div class="wh${isNow ? " now" : ""}${past ? " past" : ""}">
       <span class="h-pct t-${kind.key}">${p}%</span>
       <span class="h-bar"><i class="k-${kind.key}" style="height:${Math.max(p, 2)}%"></i></span>
@@ -1021,6 +1034,111 @@ async function radarHasPrecip(host, path, z) {
   return sizes.some((s) => s > CONFIG.emptyTileMaxBytes);
 }
 
+/* =========================================================================
+ * Eigene Niederschlagsprognose aus dem MeteoSwiss-Modell
+ *
+ * RainViewers Nowcast ist auf 30 Minuten begrenzt und fehlt zeitweise ganz.
+ * Open-Meteo kann jedoch mehrere Koordinaten in einer einzigen Anfrage
+ * beantworten. Über ein Gitter um die Rezeption entsteht daraus ein
+ * eigenes Vorhersagefeld: für jeden Gitterpunkt der Niederschlag je
+ * 15 Minuten, zwei Stunden voraus. Gezeichnet wird das als kleines Bild
+ * (ein Pixel je Gitterpunkt), das der Browser weich hochskaliert — daraus
+ * werden Flächen, die über die Karte ziehen.
+ *
+ * Auflösung: rund 6 km. Gröber als Radar, dafür echte Vorhersage aus dem
+ * Modell statt Weiterschieben vorhandener Flächen.
+ * ========================================================================= */
+const forecast = { times: [], values: [], overlay: null, bounds: null };
+
+/** Gitterkoordinaten rund um die Rezeption, zeilenweise von Nord nach Süd. */
+function buildGrid() {
+  const { size, spanKm } = CONFIG.forecastGrid;
+  const dLat = spanKm / 111 / 2;
+  const dLon = spanKm / (111 * Math.cos((CONFIG.home.lat * Math.PI) / 180)) / 2;
+  const lats = [], lons = [];
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      lats.push(+(CONFIG.home.lat + dLat - (2 * dLat * r) / (size - 1)).toFixed(4));
+      lons.push(+(CONFIG.home.lon - dLon + (2 * dLon * c) / (size - 1)).toFixed(4));
+    }
+  }
+  return {
+    lats, lons,
+    bounds: [[CONFIG.home.lat - dLat, CONFIG.home.lon - dLon],
+             [CONFIG.home.lat + dLat, CONFIG.home.lon + dLon]],
+  };
+}
+
+/** Farbskala für Niederschlag je 15 Minuten (mm). */
+function precipColor(mm) {
+  if (mm >= 2.0) return [190, 60, 180, 235];
+  if (mm >= 0.8) return [120, 80, 230, 220];
+  if (mm >= 0.3) return [27, 120, 230, 205];
+  if (mm >= 0.1) return [90, 170, 245, 180];
+  if (mm >= 0.02) return [160, 210, 250, 140];
+  return [0, 0, 0, 0];
+}
+
+async function fetchForecastGrid() {
+  if (!CONFIG.forecastGrid.enabled) return false;
+  const g = buildGrid();
+  const url = "https://api.open-meteo.com/v1/forecast"
+    + `?latitude=${g.lats.join(",")}&longitude=${g.lons.join(",")}`
+    + "&minutely_15=precipitation&forecast_days=1&timezone=Europe%2FZurich"
+    + "&models=meteoswiss_icon_ch1";
+  try {
+    const raw = await fetchJson(url);
+    const list = Array.isArray(raw) ? raw : [raw];
+    if (list.length !== g.lats.length) {
+      diag.set("Prognosefeld", false,
+        `${list.length} von ${g.lats.length} Punkten geliefert`);
+      return false;
+    }
+    forecast.times = list[0].minutely_15?.time || [];
+    forecast.values = list.map((p) => p.minutely_15?.precipitation || []);
+    forecast.bounds = g.bounds;
+    diag.set("Prognosefeld", true,
+      `${list.length} Punkte · ${CONFIG.forecastGrid.steps} x 15 min · ICON-CH1`);
+    return forecast.times.length > 0;
+  } catch (err) {
+    diag.set("Prognosefeld", false, err.message);
+    console.warn("Prognosefeld nicht abrufbar", err);
+    return false;
+  }
+}
+
+/** Zeichnet einen Zeitschritt als Bild und legt ihn über die Karte. */
+function drawForecastStep(timeIdx) {
+  const size = CONFIG.forecastGrid.size;
+  const cv = document.createElement("canvas");
+  cv.width = size; cv.height = size;
+  const img = cv.getContext("2d").createImageData(size, size);
+  let maxMm = 0;
+  for (let i = 0; i < size * size; i++) {
+    const mm = forecast.values[i]?.[timeIdx] ?? 0;
+    maxMm = Math.max(maxMm, mm);
+    const [r, g, b, a] = precipColor(mm);
+    img.data.set([r, g, b, a], i * 4);
+  }
+  cv.getContext("2d").putImageData(img, 0, 0);
+
+  const urlData = cv.toDataURL();
+  if (!forecast.overlay) {
+    forecast.overlay = L.imageOverlay(urlData, forecast.bounds,
+      { opacity: CONFIG.forecastGrid.opacity, interactive: false }).addTo(map);
+  } else {
+    forecast.overlay.setUrl(urlData);
+  }
+  return maxMm;
+}
+
+function hideForecastOverlay() {
+  if (forecast.overlay) forecast.overlay.setOpacity(0);
+}
+function showForecastOverlay() {
+  if (forecast.overlay) forecast.overlay.setOpacity(CONFIG.forecastGrid.opacity);
+}
+
 /** Fallback: RainViewer-Radarkacheln, letzte Stunde + 30 min Nowcast, animiert. */
 async function initRainviewerRadar() {
   const cfg = await fetchJson("https://api.rainviewer.com/public/weather-maps.json");
@@ -1059,13 +1177,24 @@ async function initRainviewerRadar() {
       { opacity: 0, maxNativeZoom: nativeZoom }).addTo(map));
   radar.idx = 0;
 
+  // Zeitschritte des eigenen Prognosefelds anhängen: erst der Ist-Zustand
+  // vom Radar, danach 15-Minuten-Schritte aus dem MeteoSwiss-Modell.
+  const fcStart = forecast.times.findIndex((t) => new Date(t).getTime() > Date.now());
+  const fcSteps = [];
+  if (fcStart >= 0) {
+    for (let s = 0; s < CONFIG.forecastGrid.steps
+                 && fcStart + s < forecast.times.length; s++) {
+      fcSteps.push({ idx: fcStart + s, t: new Date(forecast.times[fcStart + s]) });
+    }
+  }
+
   // Ohne Niederschlag bleibt die Karte leer — das sieht aus wie ein Fehler.
   // Geprüft wird das JÜNGSTE Beobachtungsbild ("regnet es gerade"), nicht
   // die weiteste Prognose: eine trockene Vorhersage würde sonst melden,
   // es sei gar kein Niederschlag da, obwohl es gerade regnet.
   const newest = past[past.length - 1] || frames[frames.length - 1];
   const wet = await radarHasPrecip(cfg.host, newest.path, nativeZoom);
-  $("#radar-empty").style.display = wet === false ? "block" : "none";
+  radar.observedEmpty = wet === false;
 
   // Für die Diagnose: reicht die Prognose überhaupt in die Zukunft?
   const fmtOr = (f) => (f ? fmtTime(new Date(f.time * 1000)) : "–");
@@ -1077,39 +1206,61 @@ async function initRainviewerRadar() {
       + `Prognose bis ${fmtOr(lastNow)} (${aheadMin >= 0 ? "+" : ""}${aheadMin} min) · Zoom ${nativeZoom}`
     : `Verlauf bis ${fmtOr(past[past.length - 1])} · keine Prognose geliefert · Zoom ${nativeZoom}`;
 
-  const lastPastIdx = past.length - 1;
+  // Gesamte Abfolge: gemessene Radarbilder, danach die eigenen
+  // Prognoseschritte aus dem MeteoSwiss-Modell.
+  const seq = [
+    ...frames.map((f, i) => ({ kind: "radar", i, t: new Date(f.time * 1000) })),
+    ...fcSteps.map((s) => ({ kind: "forecast", idx: s.idx, t: s.t })),
+  ];
+  radar.idx = 0;
+
   const step = () => {
-    radar.layers.forEach((l, i) => l.setOpacity(i === radar.idx ? CONFIG.radarOpacity : 0));
-    const f = radar.frames[radar.idx];
-    const t = new Date(f.time * 1000);
-    const isNowcast = radar.idx > lastPastIdx;
+    const f = seq[radar.idx];
+    const isForecast = f.kind === "forecast";
+
+    radar.layers.forEach((l, i) =>
+      l.setOpacity(!isForecast && i === f.i ? CONFIG.radarOpacity : 0));
+    if (isForecast) { drawForecastStep(f.idx); showForecastOverlay(); }
+    else hideForecastOverlay();
+
+    // Der Hinweis gilt nur für das gemessene Bild — während der Prognose
+    // wäre er irreführend, dort können sehr wohl Flächen zu sehen sein.
+    $("#radar-empty").style.display =
+      !isForecast && radar.observedEmpty ? "block" : "none";
+
     // Relative Beschriftung: ohne sie wirkt die Animation wie eine
     // springende Uhr statt wie ein Zeitverlauf.
-    const diffMin = Math.round((t.getTime() - Date.now()) / 60_000);
-    const rel = isNowcast ? `in ${Math.max(diffMin, 0)} min`
+    const diffMin = Math.round((f.t.getTime() - Date.now()) / 60_000);
+    const rel = isForecast ? `in ${Math.max(diffMin, 0)} min`
               : diffMin >= -2 ? "jetzt" : `vor ${-diffMin} min`;
-    const pct = ((radar.idx + 1) / radar.frames.length) * 100;
+    const pct = ((radar.idx + 1) / seq.length) * 100;
     $("#radar-label").innerHTML =
-      `<span class="rl-time">${fmtTime(t)}</span> `
-      + `<span class="${isNowcast ? "nowcast" : "rl-rel"}">${rel}${isNowcast ? " · Prognose" : ""}</span>`
+      `<span class="rl-time">${fmtTime(f.t)}</span> `
+      + `<span class="${isForecast ? "nowcast" : "rl-rel"}">${rel}`
+      + `${isForecast ? " · Prognose" : ""}</span>`
       + `<span class="rl-bar"><i style="width:${pct}%"></i></span>`;
+
     // Auf dem letzten (am weitesten vorausschauenden) Bild länger stehen
     // bleiben — das ist die Aussage, die man im Vorbeigehen mitnimmt.
-    const isLast = radar.idx === radar.frames.length - 1;
-    radar.idx = (radar.idx + 1) % radar.frames.length;
-    // Bei nur einem Bild gibt es nichts zu animieren — dann kein Timer,
-    // das Bild bleibt einfach stehen.
-    if (radar.frames.length > 1) {
+    const isLast = radar.idx === seq.length - 1;
+    radar.idx = (radar.idx + 1) % seq.length;
+    if (seq.length > 1) {
       radar.timer = setTimeout(step, isLast ? CONFIG.radarHoldMs : CONFIG.radarFrameMs);
     }
   };
   step();
-  $("#radar-src").textContent = "Radar: RainViewer (Fallback)";
-  diag.set("Radar", true, radarInfo);
+
+  const quelle = fcSteps.length
+    ? `Radar: RainViewer · Prognose: MeteoSwiss ICON-CH1`
+    : `Radar: RainViewer (Fallback)`;
+  $("#radar-src").textContent = quelle;
+  diag.set("Radar", true, radarInfo
+    + (fcSteps.length ? ` · +${fcSteps.length} eigene Prognoseschritte` : ""));
 }
 
 async function refreshRadar() {
   try {
+    await fetchForecastGrid();          // eigenes Prognosefeld zuerst holen
     if (radar.mode !== "rainviewer" && await tryWmsRadar()) return;
     await initRainviewerRadar();
   } catch (err) {

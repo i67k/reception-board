@@ -187,9 +187,33 @@ stehen — die Tafel spielt dann **keine** alten Bilder als Ersatz ab.
 Ob und wie weit die Prognose reicht, steht im Diagnose-Overlay und lässt
 sich mit `tools/api-check.js` im Detail nachlesen.
 
-Eine Prognose, die weiter reicht, gibt es ohne Key nur über das echte
-MeteoSwiss-Nowcast — und das setzt einen kleinen Proxy voraus, weil
-MeteoSwiss keine CORS-Header sendet (siehe Ausbaustufe unten).
+### Eigenes Prognosefeld aus dem MeteoSwiss-Modell
+
+Weil RainViewers Nowcast kurz ist und zeitweise ganz fehlt, rechnet die
+Tafel sich eine eigene Vorhersage — ohne Key und ohne Proxy:
+
+Open-Meteo beantwortet **mehrere Koordinaten in einer einzigen Anfrage**.
+Über ein Gitter um die Rezeption (9 × 9 Punkte, rund 6 km Raster, 54 km
+Kantenlänge) entsteht daraus ein Vorhersagefeld aus **ICON-CH1**: je
+Gitterpunkt der Niederschlag in 15-Minuten-Schritten, **2 Stunden voraus**.
+
+Gezeichnet wird das als winziges Bild — ein Pixel je Gitterpunkt —, das der
+Browser weich hochskaliert und Leaflet als `imageOverlay` über die Karte
+legt. Daraus werden Flächen, die über die Karte ziehen.
+
+Die Animation läuft dadurch: gemessenes Radarbild („jetzt") → 8
+Prognoseschritte bis +2 h. Was Prognose ist, steht im Label und ist blau
+markiert; die Fusszeile nennt beide Quellen getrennt.
+
+**Grenzen, ehrlich benannt:** Die Auflösung ist mit ~6 km deutlich gröber
+als Radar (~1 km), einzelne Schauer können durchs Raster fallen. Und es ist
+eine Modellvorhersage, keine Fortschreibung gemessener Flächen — sie kann
+anders liegen als das, was das Radar gerade zeigt.
+
+Aufwand gegenüber Open-Meteo: 81 Punkte alle 20 Minuten = 5832 gewichtete
+Aufrufe pro Tag, unterhalb des freien Kontingents von 10 000. Über
+`CONFIG.forecastGrid` einstellbar (`size`, `spanKm`, `steps`, `refreshMs`),
+mit `enabled: false` abschaltbar.
 
 Auf dem letzten, am weitesten vorausschauenden Bild bleibt die Animation
 kurz stehen (`CONFIG.radarHoldMs`) — das ist die Aussage, die man im
