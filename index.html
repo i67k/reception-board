@@ -170,7 +170,7 @@
 
   /* Hinweis, wenn im Kartenausschnitt gar kein Niederschlag liegt —
      sonst ist eine leere Karte nicht von einer kaputten zu unterscheiden. */
-  #radar-empty, #radar-note {
+  #radar-empty {
     display: none; position: absolute; z-index: 1000;
     left: 50%; transform: translateX(-50%);
     background: rgba(255,255,255,0.94); border: 1px solid var(--line);
@@ -179,7 +179,6 @@
     box-shadow: 0 2px 10px rgba(15,39,57,0.07);
   }
   #radar-empty { bottom: 0.9rem; }
-  #radar-note  { bottom: 3rem; color: var(--warn); border-color: #f0dcb4; }
 
   #radar-label {
     position: absolute; z-index: 1000; top: 0.7rem; right: 0.7rem;
@@ -328,7 +327,6 @@
       <div id="map"></div>
       <div id="radar-label">Radar lädt…</div>
       <div id="radar-empty">Aktuell kein Niederschlag im Kartenausschnitt</div>
-      <div id="radar-note"></div>
     </div>
     <div id="rain-timeline"></div>
     <div id="weather-card">
@@ -1056,14 +1054,6 @@ async function initRainviewerRadar() {
       + `Prognose bis ${fmtOr(lastNow)} (${aheadMin >= 0 ? "+" : ""}${aheadMin} min) · Zoom ${nativeZoom}`
     : `Verlauf bis ${fmtOr(past[past.length - 1])} · keine Prognose geliefert · Zoom ${nativeZoom}`;
 
-  // Prognose fehlt oder liegt bereits in der Vergangenheit -> benennen,
-  // statt den Eindruck zu lassen, die Zukunft werde einfach nicht gezeigt.
-  const forecastUseless = !nowcast.length || aheadMin <= 0;
-  $("#radar-note").style.display = forecastUseless ? "block" : "none";
-  $("#radar-note").textContent = nowcast.length
-    ? "Prognosebilder von RainViewer sind bereits abgelaufen"
-    : "RainViewer liefert derzeit keine Prognosebilder";
-
   const lastPastIdx = past.length - 1;
   const step = () => {
     radar.layers.forEach((l, i) => l.setOpacity(i === radar.idx ? CONFIG.radarOpacity : 0));
@@ -1088,7 +1078,7 @@ async function initRainviewerRadar() {
   };
   step();
   $("#radar-src").textContent = "Radar: RainViewer (Fallback)";
-  diag.set("Radar", !forecastUseless, radarInfo);
+  diag.set("Radar", true, radarInfo);
 }
 
 async function refreshRadar() {
