@@ -81,6 +81,47 @@
         }
       }
     }
+    /* Unterscheiden sich die Prognosebilder überhaupt vom aktuellen Bild?
+     * Verglichen werden die echten Bytes: gleiche Prüfsumme = identisches
+     * Bild = die "Prognose" zeigt nichts, was nicht schon jetzt zu sehen
+     * ist. Geprüft wird der 2x2-Kachelblock um Zürich auf Zoom 7.        */
+    if (newest && nowcast.length) {
+      console.log("\nVergleich: unterscheiden sich die Prognosebilder vom aktuellen Bild?");
+      const z = 7, t = tileXY(z);
+      const block = [[0, 0], [1, 0], [0, 1], [1, 1]];
+
+      const fingerprint = async (frame) => {
+        const parts = [];
+        for (const [dx, dy] of block) {
+          const url = `${cfg.host}${frame.path}/256/${z}/${t.x + dx}/${t.y + dy}/2/1_1.png`;
+          const buf = new Uint8Array(await (await fetch(url, { cache: "no-store" })).arrayBuffer());
+          let sum = 0;
+          for (let i = 0; i < buf.length; i++) sum = (sum * 31 + buf[i]) >>> 0;
+          parts.push(buf.length + ":" + sum.toString(16));
+        }
+        return parts.join(" | ");
+      };
+
+      try {
+        const ref = await fingerprint(newest);
+        console.log(`  jetzt   ${fmt(newest.time * 1000).padEnd(6)} ${ref}`);
+        let anyDifferent = false;
+        for (const f of nowcast) {
+          const fp = await fingerprint(f);
+          const same = fp === ref;
+          if (!same) anyDifferent = true;
+          console.log(`  ${rel(f.time * 1000).padEnd(8)}${fmt(f.time * 1000).padEnd(6)} ${fp}`
+            + (same ? "   ➜ IDENTISCH mit jetzt" : "   ➜ unterscheidet sich"));
+        }
+        console.log(anyDifferent
+          ? "➜ Die Prognose zeigt tatsächlich andere Bilder als den Ist-Zustand."
+          : "➜ PROBLEM: Alle Prognosebilder sind byte-identisch mit dem aktuellen Bild. "
+            + "RainViewer rechnet für dieses Gebiet gerade nichts vor — typisch, wenn "
+            + "kein Niederschlag da ist, den man weiterbewegen könnte.");
+      } catch (e) {
+        console.log("  Vergleich nicht möglich:", e.message);
+      }
+    }
   } catch (e) {
     console.error("RainViewer nicht erreichbar:", e.message);
   }
