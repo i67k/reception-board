@@ -246,6 +246,9 @@
     align-items: center; gap: 0.2rem; padding: 0.3rem 0; border-radius: 0.45rem;
   }
   .wh.now { background: var(--accent-100); }
+  /* Tageswechsel: Linie davor, damit 0:00 nicht wie heute früh wirkt */
+  .wh.daybreak { border-left: 1px solid var(--line); }
+  .wh.daybreak .h-time::before { content: "→ "; color: var(--muted); }
   .wh .h-pct { font-size: 0.68rem; font-variant-numeric: tabular-nums; color: var(--muted); }
   .wh .h-bar {
     width: 100%; max-width: 1.4rem; height: 2.4rem; background: var(--surface);
@@ -430,7 +433,12 @@ const CONFIG = {
   delayWarnMin:  2,                      // gelb ab X Minuten Verspätung
   delayAlertMin: 5,                      // rot ab X Minuten
 
-  forecastHours: 12,                     // Stunden im Tagesverlauf-Streifen
+  // Tagesverlauf: bis zum Ende des Tages, aber nie weniger als
+  // forecastHoursMin (abends läuft er dann in den nächsten Tag hinein)
+  // und nie mehr als forecastHoursMax (sonst werden die Spalten zu schmal).
+  dayEndHour:       23,
+  forecastHoursMin: 9,
+  forecastHoursMax: 18,
   rainRiskPct:   40,                     // ab welcher Wahrscheinlichkeit "Regenrisiko"
 
   maxLookaheadMin: 90,                   // Abfahrten weiter weg ausblenden
@@ -771,7 +779,10 @@ async function refreshWeather() {
 
   // Regenwahrscheinlichkeit: Maximum der nächsten 2 Stunden
   const hh = data.hourly || {};
-  const hIdx = (hh.time || []).findIndex((t) => new Date(t).getTime() >= Date.now());
+  // Index der LAUFENDEN Stunde, nicht der nächsten: um 07:05 ist die
+  // Spalte "jetzt" der 07-Uhr-Wert, sonst würde 08:00 als "jetzt"
+  // beschriftet und die laufende Stunde fiele ganz aus dem Streifen.
+  const hIdx = Math.max((hh.time || []).findIndex((t) => new Date(t).getTime() > Date.now()) - 1, 0);
   const probs = (hh.precipitation_probability || []).slice(Math.max(hIdx, 0), Math.max(hIdx, 0) + 2)
     .filter((p) => p != null);
   const prob = probs.length ? Math.max(...probs) : null;
@@ -856,22 +867,34 @@ function renderHourly(hh, from) {
   const times = hh.time || [];
   if (!times.length) { el.innerHTML = ""; $("#w-legend").innerHTML = ""; return; }
 
+  // Bis Tagesende reichen, aber innerhalb der Grenzen bleiben
+  const nowH = new Date(times[from]);
+  const bisTagesende = CONFIG.dayEndHour - nowH.getHours() + 1;
+  const count = Math.min(CONFIG.forecastHoursMax,
+    Math.max(CONFIG.forecastHoursMin, bisTagesende));
   const slice = [];
-  for (let i = from; i < Math.min(from + CONFIG.forecastHours, times.length); i++) slice.push(i);
+  for (let i = from; i < Math.min(from + count, times.length); i++) slice.push(i);
+
+  // Bei vielen Spalten kleinere Symbole, damit nichts überläuft
+  const iconPx = slice.length > 13 ? 21 : 26;
 
   const seen = new Map();   // Arten, die im Zeitfenster tatsächlich vorkommen
+  let lastDay = null;
   el.innerHTML = slice.map((i, n) => {
     const t = new Date(times[i]);
+    // Tageswechsel markieren, sonst wirken 0:00 und 1:00 wie heute früh
+    const dayBreak = lastDay !== null && t.getDate() !== lastDay;
+    lastDay = t.getDate();
     const p = hh.precipitation_probability?.[i] ?? 0;
     const temp = hh.temperature_2m?.[i];
     const code = hh.weather_code?.[i];
     const kind = precipKind(code);
     if (kind.label && p >= CONFIG.rainRiskPct) seen.set(kind.key, kind.label);
     // Mindesthöhe 2 %, damit auch 0 % als flacher Balken sichtbar bleibt
-    return `<div class="wh${n === 0 ? " now" : ""}">
+    return `<div class="wh${n === 0 ? " now" : ""}${dayBreak ? " daybreak" : ""}">
       <span class="h-pct t-${kind.key}">${p}%</span>
       <span class="h-bar"><i class="k-${kind.key}" style="height:${Math.max(p, 2)}%"></i></span>
-      <span class="h-icon">${weatherIcon(code, 26)}</span>
+      <span class="h-icon">${weatherIcon(code, iconPx)}</span>
       <span class="h-temp">${temp != null ? Math.round(temp) + "°" : "–"}</span>
       <span class="h-time">${n === 0 ? "jetzt" : fmtTime(t)}</span>
     </div>`;

@@ -151,6 +151,21 @@ Diagnose-Overlay (Taste `d`), z.B. `RainViewer · 10 Bilder · Zoom 7`.
 irrelevant); transport.opendata.ch, Open-Meteo und RainViewer senden
 `Access-Control-Allow-Origin: *`.
 
+## Tagesverlauf im Wetter
+
+Der Stundenstreifen reicht bis zum Ende des Tages (`CONFIG.dayEndHour`,
+Standard 23 Uhr), begrenzt durch `forecastHoursMin` / `forecastHoursMax`:
+
+- **Morgens** steht der ganze Arbeitstag da (07:00 bis 23:00 = 17 Spalten).
+- **Abends** würde bis Tagesende zu wenig übrig bleiben, deshalb läuft der
+  Streifen in den nächsten Tag hinein — mindestens 9 Spalten. Der
+  Tageswechsel ist mit einer Trennlinie und einem `→` markiert.
+- Die erste Spalte ist immer die **laufende** Stunde, beschriftet mit
+  „jetzt".
+
+Bei mehr als 13 Spalten werden die Wettersymbole automatisch kleiner
+gezeichnet, damit nichts überläuft.
+
 ## Radar-Zeitumfang
 
 Die Animation spielt Vergangenheit und Prognose in einem Durchlauf:
