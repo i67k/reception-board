@@ -246,9 +246,9 @@
     align-items: center; gap: 0.2rem; padding: 0.3rem 0; border-radius: 0.45rem;
   }
   .wh.now { background: var(--accent-100); }
-  /* Tageswechsel: Linie davor, damit 0:00 nicht wie heute früh wirkt */
-  .wh.daybreak { border-left: 1px solid var(--line); }
-  .wh.daybreak .h-time::before { content: "→ "; color: var(--muted); }
+  /* Bereits vergangene Stunden bleiben stehen, treten aber zurück */
+  .wh.past { opacity: 0.38; }
+  #w-hours { gap: 0.15rem; }
   .wh .h-pct { font-size: 0.68rem; font-variant-numeric: tabular-nums; color: var(--muted); }
   .wh .h-bar {
     width: 100%; max-width: 1.4rem; height: 2.4rem; background: var(--surface);
@@ -413,8 +413,10 @@ const CONFIG = {
   // dann die Prognose. RainViewer liefert Vergangenheit im 10-Minuten-Takt
   // und bis zu 3 Prognosebilder (rund 30 min voraus, mehr gibt der freie
   // Dienst nicht her).
-  radarPastFrames: 2,                    // 10 min davor + aktuelles Bild
-  radarPastFramesNoForecast: 12,         // ohne Prognose: voller Verlauf (2 h)
+  // Nur Gegenwart und Prognose — keine Vergangenheit. Liefert RainViewer
+  // keine Prognosebilder, bleibt das aktuelle Bild einfach stehen, statt
+  // ersatzweise alte Bilder abzuspielen.
+  radarPastFrames: 1,                    // ausschliesslich das aktuellste Bild
   radarNowcast: true,                    // Prognosebilder mitspielen
 
   refreshOevMs:     60_000,              // Abfahrten
@@ -433,12 +435,10 @@ const CONFIG = {
   delayWarnMin:  2,                      // gelb ab X Minuten Verspätung
   delayAlertMin: 5,                      // rot ab X Minuten
 
-  // Tagesverlauf: bis zum Ende des Tages, aber nie weniger als
-  // forecastHoursMin (abends läuft er dann in den nächsten Tag hinein)
-  // und nie mehr als forecastHoursMax (sonst werden die Spalten zu schmal).
-  dayEndHour:       23,
-  forecastHoursMin: 9,
-  forecastHoursMax: 18,
+  // Tagesverlauf: voller Kalendertag 00:00 bis 23:00 (24 Spalten).
+  // Bereits vergangene Stunden bleiben stehen, nur gedimmt — so sieht man
+  // morgens wie abends denselben Tagesbogen.
+  dayHours: 24,
   rainRiskPct:   40,                     // ab welcher Wahrscheinlichkeit "Regenrisiko"
 
   maxLookaheadMin: 90,                   // Abfahrten weiter weg ausblenden
@@ -867,36 +867,41 @@ function renderHourly(hh, from) {
   const times = hh.time || [];
   if (!times.length) { el.innerHTML = ""; $("#w-legend").innerHTML = ""; return; }
 
-  // Bis Tagesende reichen, aber innerhalb der Grenzen bleiben
-  const nowH = new Date(times[from]);
-  const bisTagesende = CONFIG.dayEndHour - nowH.getHours() + 1;
-  const count = Math.min(CONFIG.forecastHoursMax,
-    Math.max(CONFIG.forecastHoursMin, bisTagesende));
-  const slice = [];
-  for (let i = from; i < Math.min(from + count, times.length); i++) slice.push(i);
+  // Voller Kalendertag: 00:00 bis 23:00 des Tages, in dem "jetzt" liegt.
+  // Open-Meteo liefert die Stundenreihe ab Mitternacht, der Tagesbeginn ist
+  // also der letzte Index vor "from", dessen Datum noch dasselbe ist.
+  const heute = new Date(times[from]).getDate();
+  let dayStart = from;
+  while (dayStart > 0 && new Date(times[dayStart - 1]).getDate() === heute) dayStart--;
 
-  // Bei vielen Spalten kleinere Symbole, damit nichts überläuft
-  const iconPx = slice.length > 13 ? 21 : 26;
+  const slice = [];
+  for (let i = dayStart; i < Math.min(dayStart + CONFIG.dayHours, times.length); i++) slice.push(i);
+
+  // Bei vielen Spalten kleinere Symbole und nur jede zweite Uhrzeit,
+  // damit sich die Beschriftung nicht überlappt.
+  const iconPx = slice.length > 18 ? 18 : slice.length > 13 ? 21 : 26;
+  const labelEvery = slice.length > 18 ? 2 : 1;
 
   const seen = new Map();   // Arten, die im Zeitfenster tatsächlich vorkommen
-  let lastDay = null;
   el.innerHTML = slice.map((i, n) => {
     const t = new Date(times[i]);
-    // Tageswechsel markieren, sonst wirken 0:00 und 1:00 wie heute früh
-    const dayBreak = lastDay !== null && t.getDate() !== lastDay;
-    lastDay = t.getDate();
+    // Ist diese Stunde schon vorbei? Dann gedimmt darstellen.
+    const past = i < from;
     const p = hh.precipitation_probability?.[i] ?? 0;
     const temp = hh.temperature_2m?.[i];
     const code = hh.weather_code?.[i];
     const kind = precipKind(code);
     if (kind.label && p >= CONFIG.rainRiskPct) seen.set(kind.key, kind.label);
     // Mindesthöhe 2 %, damit auch 0 % als flacher Balken sichtbar bleibt
-    return `<div class="wh${n === 0 ? " now" : ""}${dayBreak ? " daybreak" : ""}">
+    const isNow = i === from;
+    const label = isNow ? "jetzt"
+      : (n % labelEvery === 0 ? String(t.getHours()).padStart(2, "0") : "");
+    return `<div class="wh${isNow ? " now" : ""}${past ? " past" : ""}">
       <span class="h-pct t-${kind.key}">${p}%</span>
       <span class="h-bar"><i class="k-${kind.key}" style="height:${Math.max(p, 2)}%"></i></span>
       <span class="h-icon">${weatherIcon(code, iconPx)}</span>
       <span class="h-temp">${temp != null ? Math.round(temp) + "°" : "–"}</span>
-      <span class="h-time">${n === 0 ? "jetzt" : fmtTime(t)}</span>
+      <span class="h-time">${label || "&nbsp;"}</span>
     </div>`;
   }).join("");
 
@@ -1020,12 +1025,7 @@ async function radarHasPrecip(host, path, z) {
 async function initRainviewerRadar() {
   const cfg = await fetchJson("https://api.rainviewer.com/public/weather-maps.json");
   const nowcast = CONFIG.radarNowcast ? (cfg.radar.nowcast || []) : [];
-  // Der kurze Anlauf ergibt nur Sinn, wenn danach eine Prognose folgt.
-  // Liefert RainViewer keine (kommt vor, etwa an niederschlagsfreien Tagen),
-  // wäre die Animation sonst ein Standbild — dann lieber den vollen Verlauf
-  // zeigen, damit wenigstens die Zugrichtung erkennbar ist.
-  const wantPast = nowcast.length ? CONFIG.radarPastFrames : CONFIG.radarPastFramesNoForecast;
-  const past = (cfg.radar.past || []).slice(-wantPast);
+  const past = (cfg.radar.past || []).slice(-CONFIG.radarPastFrames);
   const frames = [...past, ...nowcast];
 
   // Höchste Zoomstufe suchen, die echte Kacheln liefert
@@ -1097,7 +1097,11 @@ async function initRainviewerRadar() {
     // bleiben — das ist die Aussage, die man im Vorbeigehen mitnimmt.
     const isLast = radar.idx === radar.frames.length - 1;
     radar.idx = (radar.idx + 1) % radar.frames.length;
-    radar.timer = setTimeout(step, isLast ? CONFIG.radarHoldMs : CONFIG.radarFrameMs);
+    // Bei nur einem Bild gibt es nichts zu animieren — dann kein Timer,
+    // das Bild bleibt einfach stehen.
+    if (radar.frames.length > 1) {
+      radar.timer = setTimeout(step, isLast ? CONFIG.radarHoldMs : CONFIG.radarFrameMs);
+    }
   };
   step();
   $("#radar-src").textContent = "Radar: RainViewer (Fallback)";

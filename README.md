@@ -153,31 +153,43 @@ irrelevant); transport.opendata.ch, Open-Meteo und RainViewer senden
 
 ## Tagesverlauf im Wetter
 
-Der Stundenstreifen reicht bis zum Ende des Tages (`CONFIG.dayEndHour`,
-Standard 23 Uhr), begrenzt durch `forecastHoursMin` / `forecastHoursMax`:
+Der Stundenstreifen zeigt den **vollen Kalendertag**: 00:00 bis 23:00,
+24 Spalten (`CONFIG.dayHours`). Damit sieht man morgens wie abends
+denselben Tagesbogen an derselben Stelle.
 
-- **Morgens** steht der ganze Arbeitstag da (07:00 bis 23:00 = 17 Spalten).
-- **Abends** würde bis Tagesende zu wenig übrig bleiben, deshalb läuft der
-  Streifen in den nächsten Tag hinein — mindestens 9 Spalten. Der
-  Tageswechsel ist mit einer Trennlinie und einem `→` markiert.
-- Die erste Spalte ist immer die **laufende** Stunde, beschriftet mit
-  „jetzt".
+- Bereits vergangene Stunden bleiben stehen, treten aber zurück (gedimmt).
+- Die laufende Stunde ist blau hinterlegt und mit „jetzt" beschriftet.
+- Ab 19 Spalten wird nur jede zweite Uhrzeit beschriftet und die Symbole
+  werden kleiner gezeichnet, damit sich nichts überlappt.
 
-Bei mehr als 13 Spalten werden die Wettersymbole automatisch kleiner
-gezeichnet, damit nichts überläuft.
+Die Werte der vergangenen Stunden kommen aus derselben Open-Meteo-Antwort
+wie die Vorhersage — die Stundenreihe beginnt bei Mitternacht des aktuellen
+Tages. Es wird nichts zwischengespeichert und nichts geschätzt.
 
 ## Radar-Zeitumfang
 
 Die Animation spielt Vergangenheit und Prognose in einem Durchlauf:
 
-- **Vergangenheit:** RainViewer liefert Bilder im 10-Minuten-Takt, rund
-  2 Stunden zurück. `CONFIG.radarPastFrames` steuert, wie viele davon
-  gezeigt werden — Standard **2**, also nur ein kurzer Anlauf (10 Minuten
-  davor plus aktuelles Bild). Für den Blick im Vorbeigehen zählt, was
-  kommt; auf 12 gestellt zeigt es stattdessen die vollen 2 Stunden.
+- **Vergangenheit:** wird nicht gezeigt. `CONFIG.radarPastFrames` steht auf
+  **1**, also ausschliesslich das aktuellste Beobachtungsbild als
+  Ausgangspunkt. Höher gesetzt spielt die Animation entsprechend viele
+  10-Minuten-Schritte Vergangenheit mit ab.
 - **Zukunft:** bis zu 3 Prognosebilder, also rund **30 Minuten voraus** —
-  mehr gibt der freie Dienst nicht her. Abschaltbar über
-  `CONFIG.radarNowcast: false`, dann läuft nur der Verlauf.
+  mehr gibt der freie Dienst nicht her.
+
+**Wichtige Einschränkung, am echten Dienst gemessen:** RainViewer liefert
+das Feld `nowcast` zeitweise als **leere Liste** — an einem trockenen Tag
+im August waren es 13 Vergangenheitsbilder und **0 Prognosebilder**.
+Vermutlich, weil der Nowcast vorhandene Regenflächen mit dem Wind
+weiterrechnet und es ohne Niederschlag nichts weiterzurechnen gibt;
+bestätigt ist das nicht. Kommt keine Prognose, bleibt das aktuelle Bild
+stehen — die Tafel spielt dann **keine** alten Bilder als Ersatz ab.
+Ob und wie weit die Prognose reicht, steht im Diagnose-Overlay und lässt
+sich mit `tools/api-check.js` im Detail nachlesen.
+
+Eine Prognose, die weiter reicht, gibt es ohne Key nur über das echte
+MeteoSwiss-Nowcast — und das setzt einen kleinen Proxy voraus, weil
+MeteoSwiss keine CORS-Header sendet (siehe Ausbaustufe unten).
 
 Auf dem letzten, am weitesten vorausschauenden Bild bleibt die Animation
 kurz stehen (`CONFIG.radarHoldMs`) — das ist die Aussage, die man im
