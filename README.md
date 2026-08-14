@@ -38,6 +38,13 @@ Zugriff aufs Firmennetz. Es werden keine Personendaten verarbeitet.
 | Zweck | Quelle | Zugriff |
 |---|---|---|
 | Abfahrten & Verspätungen | [transport.opendata.ch](https://transport.opendata.ch/docs.html) `/v1/stationboard` | JSON, CORS offen |
+
+**Was die ÖV-API liefert — und was nicht:** Pro Abfahrt gibt es Linie, Ziel,
+Fahrplanzeit und ein Feld `delay` mit der Verspätung in Minuten. Ein Feld
+für Störungen, Ausfälle oder Betriebsmeldungen gibt es **nicht**. Die Tafel
+zeigt deshalb ausschliesslich die Verspätungsminuten und bewertet sie nur
+farblich (gelb ab `delayWarnMin`, rot ab `delayAlertMin`) — Begriffe wie
+„Störung" wären eine Interpretation, die die Daten nicht hergeben.
 | Wetterzahlen | [Open-Meteo](https://open-meteo.com) mit MeteoSwiss-Modell **ICON-CH1** (Fallback: best match) | JSON, CORS offen |
 | Basiskarte | Swisstopo Pixelkarte grau via [wmts.geo.admin.ch](https://wmts.geo.admin.ch) | Bildkacheln (kein CORS nötig) |
 | Regenradar | siehe unten | Bildkacheln |

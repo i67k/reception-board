@@ -58,15 +58,7 @@
   .brand b { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; }
   .brand span { font-size: 0.82rem; color: var(--muted); }
 
-  /* Normalbetrieb bleibt bewusst unscheinbar, Störungen springen an */
-  #global-status {
-    flex: 1; text-align: center;
-    font-size: 1.05rem; font-weight: 600; color: var(--muted);
-    padding: 0.35rem 0.9rem; border-radius: 999px;
-    transition: background 0.4s;
-  }
-  #global-status.warn  { color: var(--warn);  background: var(--warn-100); }
-  #global-status.alert { color: var(--alert); background: var(--alert-100); }
+  .brand { flex: 1; }
 
   #clock {
     font-size: 2.3rem; font-weight: 300; letter-spacing: -0.02em;
@@ -309,8 +301,15 @@
     display: block; margin-bottom: 0.5rem; font-size: 0.68rem; color: var(--muted);
     text-transform: uppercase; letter-spacing: 0.09em;
   }
-  #diag div { display: flex; gap: 0.6rem; padding: 0.16rem 0; }
-  #diag span { margin-left: auto; color: var(--muted); }
+  #diag div { display: flex; gap: 0.6rem; padding: 0.16rem 0; align-items: baseline; }
+  /* Lange Fehlermeldungen (z.B. eine ganze Anfrage-URL) dürfen das
+     Fenster nicht über die Seite hinaus dehnen. */
+  #diag { max-width: 34rem; }
+  #diag span {
+    margin-left: auto; color: var(--muted); text-align: right;
+    max-width: 22rem; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   #diag .d-ok { color: #1a9c62; }
   #diag .d-fail { color: var(--alert); }
 </style>
@@ -319,7 +318,6 @@
 
 <header>
   <div class="brand"><b>ÖV &amp; Wetter</b><span>Zürich West</span></div>
-  <div id="global-status" class="ok">…</div>
   <div id="clock">--:--</div>
 </header>
 
@@ -580,20 +578,24 @@ function toDeparture(j) {
   return { line, cat, to: j.to, scheduled, delayMin, effective };
 }
 
+/**
+ * Zustand einer Haltestelle — bewusst nur die grösste Verspätung in
+ * Minuten. Die API liefert je Abfahrt ausschliesslich ein Feld `delay`
+ * (Minuten); ein Störungs- oder Meldungsfeld gibt es dort nicht. Worte wie
+ * "Störung" wären also unsere Erfindung und nicht durch Daten gedeckt.
+ */
 function stopSeverity(deps) {
   let maxDelay = 0;
   for (const d of deps) maxDelay = Math.max(maxDelay, d.delayMin);
-  if (maxDelay >= CONFIG.delayAlertMin) return { cls: "alert", text: `Störung · bis +${maxDelay}′` };
-  if (maxDelay >= CONFIG.delayWarnMin)  return { cls: "warn",  text: `Verspätungen · bis +${maxDelay}′` };
-  return { cls: "ok", text: "Normalbetrieb" };
+  if (maxDelay >= CONFIG.delayAlertMin) return { cls: "alert", text: `bis +${maxDelay}′` };
+  if (maxDelay >= CONFIG.delayWarnMin)  return { cls: "warn",  text: `bis +${maxDelay}′` };
+  return { cls: "ok", text: "pünktlich" };
 }
 
 function renderStops() {
   const now = Date.now();
   const container = $("#stops");
   container.innerHTML = "";
-  let worst = "ok";
-  const problems = [];
   let anyStale = false;
 
   for (const stop of CONFIG.stops) {
@@ -612,8 +614,6 @@ function renderStops() {
     deps = deps.slice(0, stop.rows);
 
     const sev = stopSeverity(deps);
-    if (sev.cls === "alert") { worst = "alert"; problems.push(`${stop.label}: Störung`); }
-    else if (sev.cls === "warn" && worst !== "alert") { worst = "warn"; problems.push(`${stop.label}: Verspätungen`); }
 
     const stale = !st.fetchedAt || (now - st.fetchedAt) > CONFIG.staleAfterMs;
     if (stale) { card.classList.add("stale"); anyStale = true; }
@@ -656,10 +656,6 @@ function renderStops() {
       </div>${body}`;
     container.appendChild(card);
   }
-
-  const gs = $("#global-status");
-  gs.className = worst;
-  gs.textContent = worst === "ok" ? "ÖV: Alles im Normalbetrieb" : problems.join("  ·  ");
 
   $("#net-warn").style.display = anyStale ? "inline" : "none";
   $("#last-update").textContent = "Aktualisiert " + fmtTime(new Date());
